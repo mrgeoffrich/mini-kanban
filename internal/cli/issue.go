@@ -195,9 +195,13 @@ func issueShowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			docs, err := s.ListDocumentsLinkedToIssue(iss.ID)
+			if err != nil {
+				return err
+			}
 			return emit(&issueView{
 				Issue: iss, Comments: comments, Relations: rels,
-				PullRequests: prs, Attachments: atts,
+				PullRequests: prs, Attachments: atts, Documents: docs,
 			})
 		},
 	}

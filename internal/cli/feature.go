@@ -79,7 +79,7 @@ func featureListCmd() *cobra.Command {
 func featureShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <slug>",
-		Short: "Show a feature",
+		Short: "Show a feature with its issues, attachments, and linked documents",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := openStore()
@@ -95,7 +95,19 @@ func featureShowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return emit(f)
+			issues, err := s.ListIssues(store.IssueFilter{RepoID: &repo.ID, FeatureID: &f.ID})
+			if err != nil {
+				return err
+			}
+			atts, err := s.ListAttachments(store.AttachmentTarget{FeatureID: &f.ID})
+			if err != nil {
+				return err
+			}
+			docs, err := s.ListDocumentsLinkedToFeature(f.ID)
+			if err != nil {
+				return err
+			}
+			return emit(&featureView{Feature: f, Issues: issues, Attachments: atts, Documents: docs})
 		},
 	}
 }

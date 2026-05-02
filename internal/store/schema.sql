@@ -93,3 +93,37 @@ CREATE TABLE IF NOT EXISTS issue_tags (
 );
 
 CREATE INDEX IF NOT EXISTS idx_issue_tags_tag ON issue_tags(tag);
+
+CREATE TABLE IF NOT EXISTS documents (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo_id    INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    filename   TEXT    NOT NULL,
+    type       TEXT    NOT NULL CHECK (type IN
+                 ('user_docs','project_in_planning','project_in_progress',
+                  'project_complete','vendor_docs','architecture','designs',
+                  'testing_plans')),
+    content    TEXT    NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(repo_id, filename)
+);
+
+CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(type);
+
+CREATE TABLE IF NOT EXISTS document_links (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    issue_id    INTEGER REFERENCES issues(id)   ON DELETE CASCADE,
+    feature_id  INTEGER REFERENCES features(id) ON DELETE CASCADE,
+    description TEXT    NOT NULL DEFAULT '',
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK ((issue_id IS NULL) <> (feature_id IS NULL))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_doc_issue
+    ON document_links(document_id, issue_id) WHERE issue_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_doc_feature
+    ON document_links(document_id, feature_id) WHERE feature_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_doc_links_issue   ON document_links(issue_id);
+CREATE INDEX IF NOT EXISTS idx_doc_links_feature ON document_links(feature_id);

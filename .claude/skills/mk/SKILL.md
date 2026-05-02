@@ -14,6 +14,7 @@ description: Use this skill whenever you need to create, read, update, or organi
 - A **repo** is auto-detected from the current working directory by walking up to find a `.git` toplevel. Issues, features, and attachments are scoped to a repo.
 - A **feature** is an optional grouping of issues (think Linear "project"). Issues can exist without one.
 - An **issue** has a title, description, state, tags, comments, relations to other issues, attached PR URLs, and text attachments. Issues are addressed by a 4-letter `PREFIX-N` key like `MINI-42`.
+- A **document** is a per-repo named text blob (markdown, etc.) with a typed category (architecture, designs, project-in-planning, …). Issues and features can link to documents with a short reason; the same document can be linked to many issues and features.
 
 **Issue states** (mirror Linear): `backlog | todo | in_progress | in_review | done | cancelled | duplicate`. The state parser also accepts dashes or spaces (`in-progress`, `in progress`).
 
@@ -154,6 +155,46 @@ mk unlink <A> <B>                    Remove every relation between two issues
 mk link MINI-42 blocks MINI-43      # MINI-42 blocks MINI-43
 mk link MINI-44 duplicate-of MINI-42
 mk unlink MINI-42 MINI-43
+```
+
+### Documents
+
+A per-repo store of named text documents (markdown specs, design notes, vendor docs, …). Each document has a logical filename (unique within the repo) and a type drawn from a fixed vocabulary. Issues and features can link to documents with an optional `--why` description; re-linking the same pair upserts the description.
+
+**Document types** (canonical underscore form; the parser also accepts dashes/spaces):
+`user_docs | project_in_planning | project_in_progress | project_complete | vendor_docs | architecture | designs | testing_plans`. The list is extensible — additional types may appear over time.
+
+```
+mk doc add <filename>                Create a document
+  --type <type>                         Required
+  --content <text|->                    Body, or '-' for stdin
+  --content-file <path>                 Read body from a file (UTF-8 text)
+
+mk doc list [--type <type>]          List documents in the current repo
+mk doc show <filename> [--raw]       Print metadata + content + links
+                                     (--raw: content only, ignores --output)
+mk doc edit <filename>
+  --type <type>                         Change type
+  --content <text|->
+  --content-file <path>
+mk doc rm <filename>                 Delete a document (and its links)
+
+mk doc link   <filename> <ISSUE-KEY|feature-slug> [--why <text>]
+                                     Upsert a link with optional reason
+mk doc unlink <filename> <ISSUE-KEY|feature-slug>
+```
+
+`<ISSUE-KEY|feature-slug>` auto-detects: anything matching `PREFIX-N` is an issue key, otherwise it's a feature slug in the current repo.
+
+`mk issue show` and `mk feature show` both surface a "Linked documents:" section listing the documents that link to the entity, along with the per-link `--why` description.
+
+**Example:**
+```bash
+mk doc add auth-spec.md --type architecture --content-file docs/auth.md
+mk doc link auth-spec.md auth-rewrite --why "Source of truth for the JWT switch"
+mk doc link auth-spec.md MINI-42 --why "Reference for the 500 fix"
+mk doc list --type architecture
+mk doc show auth-spec.md --raw > /tmp/auth.md
 ```
 
 ### Tags

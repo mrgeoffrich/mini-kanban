@@ -49,6 +49,8 @@ func renderText(w io.Writer, v any) error {
 		}
 	case *issueView:
 		return printIssueView(w, x)
+	case *featureView:
+		return printFeatureView(w, x)
 	case *model.Issue:
 		return printIssue(w, x)
 	case []*model.Issue:
@@ -81,6 +83,20 @@ func renderText(w io.Writer, v any) error {
 		for _, a := range x {
 			fmt.Fprintf(w, "%s\t%d bytes\n", a.Filename, a.SizeBytes)
 		}
+	case *model.Document:
+		printDocument(w, x)
+	case []*model.Document:
+		for _, d := range x {
+			fmt.Fprintf(w, "%-30s %-22s %d bytes\n", d.Filename, d.Type, d.SizeBytes)
+		}
+	case *model.DocumentLink:
+		printDocLinkLine(w, x)
+	case []*model.DocumentLink:
+		for _, l := range x {
+			printDocLinkLine(w, l)
+		}
+	case *docView:
+		return printDocView(w, x)
 	case *store.IssueRelations:
 		printRelations(w, x)
 	case message:
@@ -121,11 +137,19 @@ func printIssue(w io.Writer, i *model.Issue) error {
 }
 
 type issueView struct {
-	Issue        *model.Issue          `json:"issue"`
-	Comments     []*model.Comment      `json:"comments"`
-	Relations    *store.IssueRelations `json:"relations"`
-	PullRequests []*model.PullRequest  `json:"pull_requests"`
-	Attachments  []*model.Attachment   `json:"attachments"`
+	Issue        *model.Issue           `json:"issue"`
+	Comments     []*model.Comment       `json:"comments"`
+	Relations    *store.IssueRelations  `json:"relations"`
+	PullRequests []*model.PullRequest   `json:"pull_requests"`
+	Attachments  []*model.Attachment    `json:"attachments"`
+	Documents    []*model.DocumentLink  `json:"documents"`
+}
+
+type featureView struct {
+	Feature     *model.Feature         `json:"feature"`
+	Issues      []*model.Issue         `json:"issues"`
+	Attachments []*model.Attachment    `json:"attachments"`
+	Documents   []*model.DocumentLink  `json:"documents"`
 }
 
 func printIssueView(w io.Writer, v *issueView) error {
@@ -151,6 +175,17 @@ func printIssueView(w io.Writer, v *issueView) error {
 			fmt.Fprintf(w, "  %s (%d bytes)\n", a.Filename, a.SizeBytes)
 		}
 	}
+	if len(v.Documents) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Linked documents:")
+		for _, l := range v.Documents {
+			if l.Description != "" {
+				fmt.Fprintf(w, "  %s — %s\n", l.DocumentFilename, l.Description)
+			} else {
+				fmt.Fprintf(w, "  %s\n", l.DocumentFilename)
+			}
+		}
+	}
 	if len(v.Comments) > 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "Comments:")
@@ -160,6 +195,82 @@ func printIssueView(w io.Writer, v *issueView) error {
 		}
 	}
 	return nil
+}
+
+func printFeatureView(w io.Writer, v *featureView) error {
+	f := v.Feature
+	fmt.Fprintf(w, "%s\t%s\n", f.Slug, f.Title)
+	fmt.Fprintf(w, "Created:  %s\n", localTime(f.CreatedAt))
+	fmt.Fprintf(w, "Updated:  %s\n", localTime(f.UpdatedAt))
+	if f.Description != "" {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, f.Description)
+	}
+	if len(v.Issues) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Issues:")
+		for _, i := range v.Issues {
+			fmt.Fprintf(w, "  %-10s %-12s %s\n", i.Key, i.State, i.Title)
+		}
+	}
+	if len(v.Attachments) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Attachments:")
+		for _, a := range v.Attachments {
+			fmt.Fprintf(w, "  %s (%d bytes)\n", a.Filename, a.SizeBytes)
+		}
+	}
+	if len(v.Documents) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Linked documents:")
+		for _, l := range v.Documents {
+			if l.Description != "" {
+				fmt.Fprintf(w, "  %s — %s\n", l.DocumentFilename, l.Description)
+			} else {
+				fmt.Fprintf(w, "  %s\n", l.DocumentFilename)
+			}
+		}
+	}
+	return nil
+}
+
+type docView struct {
+	Document *model.Document        `json:"document"`
+	Links    []*model.DocumentLink  `json:"links"`
+}
+
+func printDocument(w io.Writer, d *model.Document) {
+	fmt.Fprintf(w, "%s  type=%s  %d bytes\n", d.Filename, d.Type, d.SizeBytes)
+	fmt.Fprintf(w, "Created: %s\n", localTime(d.CreatedAt))
+	fmt.Fprintf(w, "Updated: %s\n", localTime(d.UpdatedAt))
+}
+
+func printDocView(w io.Writer, v *docView) error {
+	printDocument(w, v.Document)
+	if v.Document.Content != "" {
+		fmt.Fprintln(w)
+		fmt.Fprint(w, v.Document.Content)
+		if !strings.HasSuffix(v.Document.Content, "\n") {
+			fmt.Fprintln(w)
+		}
+	}
+	if len(v.Links) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Linked to:")
+		for _, l := range v.Links {
+			printDocLinkLine(w, l)
+		}
+	}
+	return nil
+}
+
+func printDocLinkLine(w io.Writer, l *model.DocumentLink) {
+	target := l.Target()
+	if l.Description != "" {
+		fmt.Fprintf(w, "  %s — %s\n", target, l.Description)
+	} else {
+		fmt.Fprintf(w, "  %s\n", target)
+	}
 }
 
 func printAttachment(w io.Writer, a *model.Attachment) {
