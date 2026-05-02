@@ -74,6 +74,12 @@ func docAddCmd() *cobra.Command {
 				return err
 			}
 			d.Content = "" // don't echo body on add
+			recordOp(s, model.HistoryEntry{
+				RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+				Op: "document.create", Kind: "document",
+				TargetID: &d.ID, TargetLabel: d.Filename,
+				Details: "type=" + string(d.Type),
+			})
 			return emit(d)
 		},
 	}
@@ -206,6 +212,15 @@ func docEditCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+				Op: "document.update", Kind: "document",
+				TargetID: &updated.ID, TargetLabel: updated.Filename,
+				Details: updatedFieldList(map[string]bool{
+					"type":    newType != nil,
+					"content": newContent != nil,
+				}),
+			})
 			return emit(updated)
 		},
 	}
@@ -237,6 +252,12 @@ func docRmCmd() *cobra.Command {
 			if err := s.DeleteDocument(d.ID); err != nil {
 				return err
 			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+				Op: "document.delete", Kind: "document",
+				TargetID: &d.ID, TargetLabel: d.Filename,
+				Details: "type=" + string(d.Type),
+			})
 			return ok("deleted document %s", d.Filename)
 		},
 	}
@@ -270,6 +291,12 @@ func docLinkCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+				Op: "document.link", Kind: "document",
+				TargetID: &d.ID, TargetLabel: d.Filename,
+				Details: "→ " + args[1],
+			})
 			return emit(link)
 		},
 	}
@@ -307,6 +334,12 @@ func docUnlinkCmd() *cobra.Command {
 			if n == 0 {
 				return fmt.Errorf("no link from %s to %s", d.Filename, args[1])
 			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+				Op: "document.unlink", Kind: "document",
+				TargetID: &d.ID, TargetLabel: d.Filename,
+				Details: "↛ " + args[1],
+			})
 			return ok("unlinked %s from %s", d.Filename, args[1])
 		},
 	}

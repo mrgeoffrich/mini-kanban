@@ -127,3 +127,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_doc_feature
     ON document_links(document_id, feature_id) WHERE feature_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_doc_links_issue   ON document_links(issue_id);
 CREATE INDEX IF NOT EXISTS idx_doc_links_feature ON document_links(feature_id);
+
+-- history is an append-only audit log. It deliberately has no foreign keys
+-- so entries survive deletion of the referenced repo/issue/feature etc.
+-- All ID/label columns are recorded as snapshots at the time of the op.
+CREATE TABLE IF NOT EXISTS history (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo_id      INTEGER,
+    repo_prefix  TEXT    NOT NULL DEFAULT '',
+    actor        TEXT    NOT NULL,
+    op           TEXT    NOT NULL,
+    kind         TEXT    NOT NULL DEFAULT '',
+    target_id    INTEGER,
+    target_label TEXT    NOT NULL DEFAULT '',
+    details      TEXT    NOT NULL DEFAULT '',
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_history_repo_time ON history(repo_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_history_actor     ON history(actor);
+CREATE INDEX IF NOT EXISTS idx_history_op        ON history(op);

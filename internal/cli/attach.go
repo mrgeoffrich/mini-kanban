@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"mini-kanban/internal/model"
 	"mini-kanban/internal/store"
 )
 
@@ -38,6 +39,49 @@ func resolveAttachTarget(s *store.Store, ref string) (store.AttachmentTarget, st
 		return store.AttachmentTarget{}, "", fmt.Errorf("%q is not an issue key or feature slug in this repo", ref)
 	}
 	return store.AttachmentTarget{FeatureID: &feat.ID}, feat.Slug, nil
+}
+
+// recordAttachmentOp logs an attachment op against its parent (issue or
+// feature). Attachment events are folded under the parent's "kind" — much
+// like comments and tags — because the audit interest is in what changed
+// on the issue/feature, not on the attachment row itself.
+func recordAttachmentOp(s *store.Store, op string, target store.AttachmentTarget, label, filename string) {
+	kind := "issue"
+	var targetID *int64
+	if target.IssueID != nil {
+		targetID = target.IssueID
+	} else if target.FeatureID != nil {
+		kind = "feature"
+		targetID = target.FeatureID
+	}
+	repoID, repoPrefix := repoIDForAttachTarget(s, target)
+	recordOp(s, model.HistoryEntry{
+		RepoID: repoID, RepoPrefix: repoPrefix,
+		Op: op, Kind: kind,
+		TargetID: targetID, TargetLabel: label,
+		Details: filename,
+	})
+}
+
+// repoIDForAttachTarget looks up the repo containing the parent entity so
+// audit rows are filterable by repo. Errors here aren't fatal — best-effort
+// enrichment.
+func repoIDForAttachTarget(s *store.Store, target store.AttachmentTarget) (*int64, string) {
+	if target.IssueID != nil {
+		if iss, err := s.GetIssueByID(*target.IssueID); err == nil {
+			if r, err := s.GetRepoByID(iss.RepoID); err == nil {
+				return &r.ID, r.Prefix
+			}
+		}
+	}
+	if target.FeatureID != nil {
+		if f, err := s.GetFeatureByID(*target.FeatureID); err == nil {
+			if r, err := s.GetRepoByID(f.RepoID); err == nil {
+				return &r.ID, r.Prefix
+			}
+		}
+	}
+	return nil, ""
 }
 
 var issueKeyShape = regexp.MustCompile(`^[A-Za-z0-9]{4}-\d+$`)
@@ -84,7 +128,7 @@ func attachAddCmd() *cobra.Command {
 				return err
 			}
 			defer s.Close()
-			target, _, err := resolveAttachTarget(s, args[0])
+			target, label, err := resolveAttachTarget(s, args[0])
 			if err != nil {
 				return err
 			}
@@ -93,6 +137,7 @@ func attachAddCmd() *cobra.Command {
 				return err
 			}
 			a.Content = "" // don't echo body on add
+			recordAttachmentOp(s, "attachment.add", target, label, name)
 			return emit(a)
 		},
 	}
@@ -180,6 +225,7 @@ func attachRmCmd() *cobra.Command {
 			if n == 0 {
 				return fmt.Errorf("no attachment named %q on %s", args[1], label)
 			}
+			recordAttachmentOp(s, "attachment.remove", target, label, args[1])
 			return ok("removed %s from %s", args[1], label)
 		},
 	}

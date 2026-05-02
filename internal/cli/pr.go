@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"mini-kanban/internal/model"
 )
 
 func newPRCmd() *cobra.Command {
@@ -55,6 +57,12 @@ func prAttachCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &iss.RepoID,
+				Op:     "pr.attach", Kind: "issue",
+				TargetID: &iss.ID, TargetLabel: iss.Key,
+				Details: pr,
+			})
 			return emit(created)
 		},
 	}
@@ -75,13 +83,20 @@ func prDetachCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			n, err := s.DetachPR(iss.ID, strings.TrimSpace(args[1]))
+			url := strings.TrimSpace(args[1])
+			n, err := s.DetachPR(iss.ID, url)
 			if err != nil {
 				return err
 			}
 			if n == 0 {
 				return fmt.Errorf("no PR matching %q on %s", args[1], iss.Key)
 			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &iss.RepoID,
+				Op:     "pr.detach", Kind: "issue",
+				TargetID: &iss.ID, TargetLabel: iss.Key,
+				Details: url,
+			})
 			return ok("detached %s from %s", args[1], iss.Key)
 		},
 	}

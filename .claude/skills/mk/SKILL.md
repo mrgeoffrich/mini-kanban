@@ -33,6 +33,7 @@ description: Use this skill whenever you need to create, read, update, or organi
   - Feature: slug string (kebab-case auto-derived from title, override with `--slug`).
   - Some commands (`mk attach`, see below) accept either; they auto-detect issue keys by the `PREFIX-N` shape.
 - **Comment author.** `--as <name>` is required on every comment. There is no auth — use a sensible identity (e.g. `Claude`, `Geoff`).
+- **`--user` is REQUIRED for AI agents.** Every mutation is recorded in an audit log alongside the actor that performed it. The CLI will silently fall back to the OS username if `--user` is omitted, but for agents that produces useless `geoff did everything` history. **Always pass `--user <your-agent-name>` (e.g. `--user Claude`) on every mutating command.** Treat it as mandatory in any agent-driven invocation, even though the binary tolerates its absence for human users.
 - **Database override.** `--db <path>` is a global flag, useful for tests. In production agents, leave it at the default.
 
 ## Command reference
@@ -155,6 +156,28 @@ mk unlink <A> <B>                    Remove every relation between two issues
 mk link MINI-42 blocks MINI-43      # MINI-42 blocks MINI-43
 mk link MINI-44 duplicate-of MINI-42
 mk unlink MINI-42 MINI-43
+```
+
+### History (audit log)
+
+Every mutation made via `mk` is appended to a per-DB audit log: who did it, when, against what, and a short detail string. Reads are not logged. The audit table has no foreign keys, so entries survive deletion of the entities they describe.
+
+```
+mk history                           Last 50 mutations in the current repo
+  --limit N                            Cap output (0 for no limit)
+  --user-filter <name>                 Only entries by this actor
+  --op <op>                            Exact op match (e.g. issue.state)
+  --since <duration>                   Look back this far: 30m, 1h, 1d, 2w
+  --all-repos                          Include every repo
+```
+
+Op naming is dotted: `repo.create`, `feature.{create,update,delete}`, `issue.{create,update,state,delete}`, `comment.add`, `relation.{create,delete}`, `pr.{attach,detach}`, `attachment.{add,remove}`, `tag.{add,remove}`, `document.{create,update,delete,link,unlink}`. Filtering by op prefix is not currently supported — match exactly.
+
+**Example:**
+```bash
+mk history --since 1d                 # what changed today
+mk history --user-filter Claude --op issue.create
+mk history --op issue.state --since 1w
 ```
 
 ### Documents

@@ -10,6 +10,9 @@ import (
 	"mini-kanban/internal/store"
 )
 
+// auto-register a repo on first use. Each call site records its own
+// history once we get a repo back.
+
 // openStore opens the configured database.
 func openStore() (*store.Store, error) {
 	path := opts.dbPath
@@ -45,5 +48,15 @@ func resolveRepo(s *store.Store) (*model.Repo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("allocate prefix: %w", err)
 	}
-	return s.CreateRepo(prefix, info.Name, info.Root, info.RemoteURL)
+	created, err := s.CreateRepo(prefix, info.Name, info.Root, info.RemoteURL)
+	if err != nil {
+		return nil, err
+	}
+	recordOp(s, model.HistoryEntry{
+		RepoID: &created.ID, RepoPrefix: created.Prefix,
+		Op: "repo.create", Kind: "repo",
+		TargetID: &created.ID, TargetLabel: created.Prefix,
+		Details: "auto-registered (" + created.Name + ")",
+	})
+	return created, nil
 }

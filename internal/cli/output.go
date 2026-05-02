@@ -99,6 +99,10 @@ func renderText(w io.Writer, v any) error {
 		return printDocView(w, x)
 	case *store.IssueRelations:
 		printRelations(w, x)
+	case []*model.HistoryEntry:
+		for _, e := range x {
+			printHistoryLine(w, e)
+		}
 	case message:
 		fmt.Fprintln(w, x.Text)
 	default:
@@ -292,6 +296,22 @@ func printRelations(w io.Writer, r *store.IssueRelations) {
 	for _, rel := range r.Incoming {
 		fmt.Fprintf(w, "  %s by %s\n", rel.Type, rel.FromIssue)
 	}
+}
+
+func printHistoryLine(w io.Writer, e *model.HistoryEntry) {
+	target := e.TargetLabel
+	if target == "" {
+		target = "-"
+	}
+	if e.RepoPrefix != "" && e.Kind != "repo" {
+		target = e.RepoPrefix + "/" + target
+	}
+	line := fmt.Sprintf("%s  %-12s %-22s %s",
+		localTime(e.CreatedAt), e.Actor, e.Op, target)
+	if e.Details != "" {
+		line += "  " + e.Details
+	}
+	fmt.Fprintln(w, line)
 }
 
 type message struct {

@@ -75,6 +75,12 @@ func newStatusCmd() *cobra.Command {
 					if err != nil {
 						return err
 					}
+					recordOp(s, model.HistoryEntry{
+						RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+						Op: "repo.create", Kind: "repo",
+						TargetID: &repo.ID, TargetLabel: repo.Prefix,
+						Details: "auto-registered via status (" + repo.Name + ")",
+					})
 					report.JustRegistered = true
 				} else if err != nil {
 					return err

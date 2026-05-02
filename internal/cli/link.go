@@ -52,6 +52,12 @@ func newLinkCmd() *cobra.Command {
 			if err := s.CreateRelation(from.ID, to.ID, t); err != nil {
 				return err
 			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &from.RepoID,
+				Op:     "relation.create", Kind: "issue",
+				TargetID: &from.ID, TargetLabel: from.Key,
+				Details: fmt.Sprintf("%s %s", t, to.Key),
+			})
 			return ok("%s %s %s", from.Key, t, to.Key)
 		},
 	}
@@ -79,6 +85,14 @@ func newUnlinkCmd() *cobra.Command {
 			n, err := s.DeleteRelation(a.ID, b.ID)
 			if err != nil {
 				return err
+			}
+			if n > 0 {
+				recordOp(s, model.HistoryEntry{
+					RepoID: &a.RepoID,
+					Op:     "relation.delete", Kind: "issue",
+					TargetID: &a.ID, TargetLabel: a.Key,
+					Details: fmt.Sprintf("unlinked from %s (%d row(s))", b.Key, n),
+				})
 			}
 			return ok("removed %d relation(s) between %s and %s", n, a.Key, b.Key)
 		},

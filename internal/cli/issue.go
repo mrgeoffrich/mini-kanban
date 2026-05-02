@@ -91,6 +91,12 @@ func issueAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+				Op: "issue.create", Kind: "issue",
+				TargetID: &iss.ID, TargetLabel: iss.Key,
+				Details: iss.Title,
+			})
 			return emit(iss)
 		},
 	}
@@ -262,6 +268,16 @@ func issueEditCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &iss.RepoID,
+				Op:     "issue.update", Kind: "issue",
+				TargetID: &updated.ID, TargetLabel: updated.Key,
+				Details: updatedFieldList(map[string]bool{
+					"title":       tPtr != nil,
+					"description": dPtr != nil,
+					"feature":     fPtr != nil,
+				}),
+			})
 			return emit(updated)
 		},
 	}
@@ -292,6 +308,7 @@ func issueStateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			oldState := iss.State
 			if err := s.SetIssueState(iss.ID, st); err != nil {
 				return err
 			}
@@ -299,6 +316,12 @@ func issueStateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &iss.RepoID,
+				Op:     "issue.state", Kind: "issue",
+				TargetID: &updated.ID, TargetLabel: updated.Key,
+				Details: fmt.Sprintf("%s → %s", oldState, st),
+			})
 			return emit(updated)
 		},
 	}
@@ -322,6 +345,12 @@ func issueRmCmd() *cobra.Command {
 			if err := s.DeleteIssue(iss.ID); err != nil {
 				return err
 			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &iss.RepoID,
+				Op:     "issue.delete", Kind: "issue",
+				TargetID: &iss.ID, TargetLabel: iss.Key,
+				Details: iss.Title,
+			})
 			return ok("issue %s deleted", iss.Key)
 		},
 	}

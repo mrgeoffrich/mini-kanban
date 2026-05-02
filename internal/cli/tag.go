@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"strings"
+
 	"github.com/spf13/cobra"
 
+	"mini-kanban/internal/model"
 	"mini-kanban/internal/store"
 )
 
@@ -38,6 +41,12 @@ func tagAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &iss.RepoID,
+				Op:     "tag.add", Kind: "issue",
+				TargetID: &iss.ID, TargetLabel: iss.Key,
+				Details: strings.Join(tags, ","),
+			})
 			return emit(updated)
 		},
 	}
@@ -69,6 +78,12 @@ func tagRmCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &iss.RepoID,
+				Op:     "tag.remove", Kind: "issue",
+				TargetID: &iss.ID, TargetLabel: iss.Key,
+				Details: strings.Join(tags, ","),
+			})
 			return emit(updated)
 		},
 	}

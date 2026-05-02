@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"mini-kanban/internal/model"
 	"mini-kanban/internal/store"
 )
 
@@ -44,6 +45,12 @@ func featureAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+				Op: "feature.create", Kind: "feature",
+				TargetID: &f.ID, TargetLabel: f.Slug,
+				Details: f.Title,
+			})
 			return emit(f)
 		},
 	}
@@ -155,6 +162,15 @@ func featureEditCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+				Op: "feature.update", Kind: "feature",
+				TargetID: &updated.ID, TargetLabel: updated.Slug,
+				Details: updatedFieldList(map[string]bool{
+					"title":       tPtr != nil,
+					"description": dPtr != nil,
+				}),
+			})
 			return emit(updated)
 		},
 	}
@@ -186,6 +202,12 @@ func featureRmCmd() *cobra.Command {
 			if err := s.DeleteFeature(f.ID); err != nil {
 				return err
 			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+				Op: "feature.delete", Kind: "feature",
+				TargetID: &f.ID, TargetLabel: f.Slug,
+				Details: f.Title,
+			})
 			return ok("feature %s deleted", f.Slug)
 		},
 	}

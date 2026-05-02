@@ -2,6 +2,8 @@ package cli
 
 import (
 	"github.com/spf13/cobra"
+
+	"mini-kanban/internal/model"
 )
 
 func newCommentCmd() *cobra.Command {
@@ -36,6 +38,12 @@ func commentAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &iss.RepoID,
+				Op:     "comment.add", Kind: "issue",
+				TargetID: &iss.ID, TargetLabel: iss.Key,
+				Details: "by " + author,
+			})
 			return emit(c)
 		},
 	}

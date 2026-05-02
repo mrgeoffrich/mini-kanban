@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"mini-kanban/internal/git"
+	"mini-kanban/internal/model"
 	"mini-kanban/internal/store"
 )
 
@@ -59,6 +60,12 @@ func newInitCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+				Op: "repo.create", Kind: "repo",
+				TargetID: &repo.ID, TargetLabel: repo.Prefix,
+				Details: "explicit init (" + repo.Name + ")",
+			})
 			return emit(repo)
 		},
 	}
