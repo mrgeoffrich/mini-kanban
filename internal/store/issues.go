@@ -26,7 +26,7 @@ func ParseIssueKey(key string) (prefix string, number int64, err error) {
 	return strings.ToUpper(m[1]), n, nil
 }
 
-func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description string, state model.State) (*model.Issue, error) {
+func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description string, state model.State, tags []string) (*model.Issue, error) {
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return nil, err
@@ -44,6 +44,9 @@ func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description s
 		return nil, err
 	}
 	id, _ := res.LastInsertId()
+	if err := s.addTagsTx(tx, id, tags); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -51,17 +54,38 @@ func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description s
 }
 
 func (s *Store) GetIssueByID(id int64) (*model.Issue, error) {
-	return scanIssue(s.DB.QueryRow(issueSelect+` WHERE i.id = ?`, id))
+	iss, err := scanIssue(s.DB.QueryRow(issueSelect + ` WHERE i.id = ?`, id))
+	if err != nil {
+		return nil, err
+	}
+	return s.attachTags(iss)
 }
 
 func (s *Store) GetIssueByKey(prefix string, number int64) (*model.Issue, error) {
-	return scanIssue(s.DB.QueryRow(issueSelect+` WHERE r.prefix = ? AND i.number = ?`, prefix, number))
+	iss, err := scanIssue(s.DB.QueryRow(issueSelect+` WHERE r.prefix = ? AND i.number = ?`, prefix, number))
+	if err != nil {
+		return nil, err
+	}
+	return s.attachTags(iss)
+}
+
+func (s *Store) attachTags(iss *model.Issue) (*model.Issue, error) {
+	tagMap, err := s.loadTagsForIssues([]int64{iss.ID})
+	if err != nil {
+		return nil, err
+	}
+	iss.Tags = tagMap[iss.ID]
+	if iss.Tags == nil {
+		iss.Tags = []string{}
+	}
+	return iss, nil
 }
 
 type IssueFilter struct {
 	RepoID    *int64
 	States    []model.State
 	FeatureID *int64
+	Tags      []string // AND semantics: issue must have ALL of these tags
 	AllRepos  bool
 }
 
@@ -86,6 +110,18 @@ func (s *Store) ListIssues(f IssueFilter) ([]*model.Issue, error) {
 		}
 		where = append(where, "i.state IN ("+strings.Join(ph, ",")+")")
 	}
+	if len(f.Tags) > 0 {
+		ph := make([]string, len(f.Tags))
+		for i, t := range f.Tags {
+			ph[i] = "?"
+			args = append(args, t)
+		}
+		// All requested tags must be present on the issue (AND semantics).
+		where = append(where, fmt.Sprintf(
+			`i.id IN (SELECT issue_id FROM issue_tags WHERE tag IN (%s) GROUP BY issue_id HAVING COUNT(DISTINCT tag) = %d)`,
+			strings.Join(ph, ","), len(f.Tags),
+		))
+	}
 	q := issueSelect
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
@@ -97,14 +133,29 @@ func (s *Store) ListIssues(f IssueFilter) ([]*model.Issue, error) {
 	}
 	defer rows.Close()
 	var out []*model.Issue
+	var ids []int64
 	for rows.Next() {
 		iss, err := scanIssue(rows)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, iss)
+		ids = append(ids, iss.ID)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	tagMap, err := s.loadTagsForIssues(ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, iss := range out {
+		iss.Tags = tagMap[iss.ID]
+		if iss.Tags == nil {
+			iss.Tags = []string{}
+		}
+	}
+	return out, nil
 }
 
 func (s *Store) UpdateIssue(id int64, title, description *string, featureID **int64) error {

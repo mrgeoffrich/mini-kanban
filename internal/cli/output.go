@@ -57,7 +57,11 @@ func renderText(w io.Writer, v any) error {
 			if i.FeatureSlug != "" {
 				feat = " [" + i.FeatureSlug + "]"
 			}
-			fmt.Fprintf(w, "%-10s %-12s%s  %s\n", i.Key, i.State, feat, i.Title)
+			tagStr := ""
+			if len(i.Tags) > 0 {
+				tagStr = "  #" + strings.Join(i.Tags, " #")
+			}
+			fmt.Fprintf(w, "%-10s %-12s%s  %s%s\n", i.Key, i.State, feat, i.Title, tagStr)
 		}
 	case *model.Comment:
 		fmt.Fprintf(w, "%s — %s\n%s\n", x.Author, localTime(x.CreatedAt), x.Body)
@@ -104,6 +108,9 @@ func printIssue(w io.Writer, i *model.Issue) error {
 	fmt.Fprintf(w, "State:    %s\n", i.State)
 	if i.FeatureSlug != "" {
 		fmt.Fprintf(w, "Feature:  %s\n", i.FeatureSlug)
+	}
+	if len(i.Tags) > 0 {
+		fmt.Fprintf(w, "Tags:     %s\n", strings.Join(i.Tags, ", "))
 	}
 	fmt.Fprintf(w, "Created:  %s\n", localTime(i.CreatedAt))
 	fmt.Fprintf(w, "Updated:  %s\n", localTime(i.UpdatedAt))

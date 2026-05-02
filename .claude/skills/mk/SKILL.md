@@ -13,7 +13,7 @@ description: Use this skill whenever you need to create, read, update, or organi
 
 - A **repo** is auto-detected from the current working directory by walking up to find a `.git` toplevel. Issues, features, and attachments are scoped to a repo.
 - A **feature** is an optional grouping of issues (think Linear "project"). Issues can exist without one.
-- An **issue** has a title, description, state, comments, relations to other issues, attached PR URLs, and text attachments. Issues are addressed by a 4-letter `PREFIX-N` key like `MINI-42`.
+- An **issue** has a title, description, state, tags, comments, relations to other issues, attached PR URLs, and text attachments. Issues are addressed by a 4-letter `PREFIX-N` key like `MINI-42`.
 
 **Issue states** (mirror Linear): `backlog | todo | in_progress | in_review | done | cancelled | duplicate`. The state parser also accepts dashes or spaces (`in-progress`, `in progress`).
 
@@ -87,10 +87,12 @@ mk issue add <title>                 Create an issue in the current repo
   --description <text|->                Inline or stdin
   --description-file <path>
   --state <state>                       Initial state (default: backlog)
+  --tag <name>                          Repeatable; attach a tag at creation
 
 mk issue list                        List issues in the current repo
   --state s1,s2                         Filter by comma-separated states
   -f, --feature <slug>                  Limit to one feature
+  --tag <name>                          Repeatable; require this tag (AND semantics)
   --all-repos                           Search every tracked repo
 
 mk issue show <KEY>                  Show issue + comments + relations + PRs + attachments
@@ -148,6 +150,24 @@ mk unlink <A> <B>                    Remove every relation between two issues
 mk link MINI-42 blocks MINI-43      # MINI-42 blocks MINI-43
 mk link MINI-44 duplicate-of MINI-42
 mk unlink MINI-42 MINI-43
+```
+
+### Tags
+
+Free-form string labels on issues. Case-sensitive (`WIP` ≠ `wip`), no internal whitespace, no fixed vocabulary — invent tags as you need them. Adding the same tag twice is a no-op.
+
+```
+mk tag add <KEY> <tag> [<tag>...]    Add one or more tags (idempotent)
+mk tag rm  <KEY> <tag> [<tag>...]    Remove tags
+```
+
+For filtering or setting at creation, use the `--tag` flag on `mk issue add` and `mk issue list` (see above). Multiple `--tag` filters are AND-combined.
+
+**Example:**
+```bash
+mk issue add "Login broken" --tag bug --tag backend --tag P0
+mk tag add MINI-42 needs-design
+mk issue list --tag bug --tag P0       # bugs that are also P0
 ```
 
 ### Pull requests

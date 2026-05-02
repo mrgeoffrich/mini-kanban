@@ -84,3 +84,12 @@ CREATE TABLE IF NOT EXISTS attachments (
 
 CREATE INDEX IF NOT EXISTS idx_attachments_issue   ON attachments(issue_id);
 CREATE INDEX IF NOT EXISTS idx_attachments_feature ON attachments(feature_id);
+
+CREATE TABLE IF NOT EXISTS issue_tags (
+    issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    tag      TEXT    NOT NULL,
+    PRIMARY KEY (issue_id, tag),
+    CHECK (length(tag) > 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_issue_tags_tag ON issue_tags(tag);

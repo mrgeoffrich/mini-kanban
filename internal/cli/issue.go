@@ -47,6 +47,7 @@ func resolveIssueByKey(s *store.Store, key string) (*model.Issue, error) {
 func issueAddCmd() *cobra.Command {
 	var (
 		featureSlug, description, descriptionFile, stateStr string
+		tags                                                []string
 	)
 	cmd := &cobra.Command{
 		Use:   "add <title>",
@@ -65,6 +66,10 @@ func issueAddCmd() *cobra.Command {
 					return err
 				}
 			}
+			cleanTags, err := store.NormalizeTags(tags)
+			if err != nil {
+				return err
+			}
 			s, err := openStore()
 			if err != nil {
 				return err
@@ -82,7 +87,7 @@ func issueAddCmd() *cobra.Command {
 				}
 				featureID = &f.ID
 			}
-			iss, err := s.CreateIssue(repo.ID, featureID, title, desc, state)
+			iss, err := s.CreateIssue(repo.ID, featureID, title, desc, state, cleanTags)
 			if err != nil {
 				return err
 			}
@@ -93,6 +98,7 @@ func issueAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&description, "description", "", "description text or '-' for stdin")
 	cmd.Flags().StringVar(&descriptionFile, "description-file", "", "path to a markdown file")
 	cmd.Flags().StringVar(&stateStr, "state", "", "initial state (default: backlog)")
+	cmd.Flags().StringSliceVar(&tags, "tag", nil, "tag to attach (repeatable)")
 	return cmd
 }
 
@@ -100,6 +106,7 @@ func issueListCmd() *cobra.Command {
 	var (
 		stateCSV    string
 		featureSlug string
+		tags        []string
 		allRepos    bool
 	)
 	cmd := &cobra.Command{
@@ -136,6 +143,13 @@ func issueListCmd() *cobra.Command {
 					f.States = append(f.States, st)
 				}
 			}
+			if len(tags) > 0 {
+				cleanTags, err := store.NormalizeTags(tags)
+				if err != nil {
+					return err
+				}
+				f.Tags = cleanTags
+			}
 			issues, err := s.ListIssues(f)
 			if err != nil {
 				return err
@@ -145,6 +159,7 @@ func issueListCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&stateCSV, "state", "", "comma-separated states to filter (e.g. todo,in_progress)")
 	cmd.Flags().StringVarP(&featureSlug, "feature", "f", "", "limit to a feature")
+	cmd.Flags().StringSliceVar(&tags, "tag", nil, "require this tag (repeatable; AND semantics)")
 	cmd.Flags().BoolVar(&allRepos, "all-repos", false, "search across all tracked repos")
 	return cmd
 }

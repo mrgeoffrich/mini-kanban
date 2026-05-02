@@ -32,6 +32,7 @@ type Issue struct {
 	Title       string    `json:"title"`
 	Description string    `json:"description,omitempty"`
 	State       State     `json:"state"`
+	Tags        []string  `json:"tags"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
