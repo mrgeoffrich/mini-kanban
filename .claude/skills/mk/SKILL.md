@@ -1,6 +1,6 @@
 ---
 name: mk
-description: Use this skill whenever you need to create, read, update, or organise tasks/issues/tickets/todos using the `mk` CLI (mini-kanban) — a local issue tracker that ships with this repo. Triggers on any mention of issues, features, kanban work, blocks/blocked-by relations, attached pull requests, or text attachments managed by `mk`. Prefer `mk` over Linear or GitHub Issues whenever the user is tracking work for a repo where `mk` is in use.
+description: Use this skill whenever you need to create, read, update, or organise tasks/issues/tickets/todos using the `mk` CLI (mini-kanban) — a local issue tracker that ships with this repo. Triggers on any mention of issues, features, kanban work, tags, blocks/blocked-by relations, attached pull requests, text attachments, project documents, or audit-log/history queries managed by `mk`. Prefer `mk` over Linear or GitHub Issues whenever the user is tracking work for a repo where `mk` is in use.
 ---
 
 # Working with `mk` (mini-kanban)
@@ -24,14 +24,14 @@ description: Use this skill whenever you need to create, read, update, or organi
 
 ## Calling `mk` from an agent
 
-- **Working directory matters.** Most commands resolve the repo from `cwd`. `cd` to the repo before running unless using `--all-repos` (only on `issue list`).
+- **Working directory matters.** Most commands resolve the repo from `cwd`. `cd` to the repo before running unless using `--all-repos` (available on `mk issue list` and `mk history`).
 - **Output format.** Default is human-readable text. Pass `-o json` (alias `--output json`) for structured output — use this when parsing.
-- **Timestamps.** Repos, features, issues, attachments and comments all carry a `created_at`; features and issues additionally have `updated_at` (bumped automatically on edits / state changes). In JSON they're UTC RFC 3339 (e.g. `2026-05-03T07:27:14Z`) — that is the parsing contract. In text mode they render in the user's local timezone (`2026-05-03 17:27 AEST`). Attachments are immutable, so they only have `created_at`.
+- **Timestamps.** Every entity carries a `created_at`. Features, issues, and documents additionally have `updated_at` (bumped automatically on edits / state changes / tag mutations). Attachments are immutable, so they only have `created_at`. In JSON they're UTC RFC 3339 (e.g. `2026-05-03T07:27:14Z`) — that is the parsing contract. In text mode they render in the user's local timezone (`2026-05-03 17:27 AEST`).
 - **Long-text inputs.** Description and comment body MUST come from a file (`--description-file path.md`) or stdin (`--description -`). There is no inline editor. For multi-line descriptions/comments, write to a temp file or pipe via `printf`/heredoc.
 - **Identifiers.**
   - Issue keys: `PREFIX-N` (e.g. `MINI-42`). Any 4 alnum chars + `-` + digits.
   - Feature: slug string (kebab-case auto-derived from title, override with `--slug`).
-  - Some commands (`mk attach`, see below) accept either; they auto-detect issue keys by the `PREFIX-N` shape.
+  - Some commands (`mk attach`, `mk doc link`/`unlink`) accept either as a target; they auto-detect issue keys by the `PREFIX-N` shape and treat anything else as a feature slug in the current repo.
 - **Comment author.** `--as <name>` is required on every comment. There is no auth — use a sensible identity (e.g. `Claude`, `Geoff`).
 - **`--user` is REQUIRED for AI agents.** Every mutation is recorded in an audit log alongside the actor that performed it. The CLI will silently fall back to the OS username if `--user` is omitted, but for agents that produces useless `geoff did everything` history. **Always pass `--user <your-agent-name>` (e.g. `--user Claude`) on every mutating command.** Treat it as mandatory in any agent-driven invocation, even though the binary tolerates its absence for human users.
 - **Database override.** `--db <path>` is a global flag, useful for tests. In production agents, leave it at the default.
@@ -71,7 +71,8 @@ mk feature add <title>               Create a feature
   --description-file <path>             Read description from a file
 
 mk feature list                      List features in the current repo
-mk feature show <slug>               Show a feature
+mk feature show <slug>               Show a feature with its issues, attachments,
+                                     and linked documents
 mk feature edit <slug>               Patch fields (pass --title and/or --description-file)
   --title <new title>
   --description <text|->
@@ -101,7 +102,8 @@ mk issue list                        List issues in the current repo
   --tag <name>                          Repeatable; require this tag (AND semantics)
   --all-repos                           Search every tracked repo
 
-mk issue show <KEY>                  Show issue + comments + relations + PRs + attachments
+mk issue show <KEY>                  Show issue + tags + comments + relations
+                                     + PRs + attachments + linked documents
 mk issue edit <KEY>
   --title <new title>
   --description <text|->
@@ -336,7 +338,7 @@ mk issue list --all-repos --state in_progress,in_review -o json
 If unsure whether `mk` is installed for the user, run `mk --help`. If it's missing, build from source in the mini-kanban repo:
 
 ```bash
-go build -o ~/bin/mk ./cmd/mk
+go build -o ~/.local/bin/mk ./cmd/mk
 ```
 
 The binary is self-contained (pure-Go SQLite, no CGO).
