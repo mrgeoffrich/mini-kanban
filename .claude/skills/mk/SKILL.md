@@ -231,12 +231,20 @@ mk issue list --all-repos --state in_progress,in_review -o json
 - **Issue numbers never repeat.** Deleting `MINI-3` does not free up the number — the next issue is still `MINI-4`.
 - **JSON output is the contract.** When parsing programmatically, always pass `-o json`. Text output is for humans and may shift.
 
-## Verifying `mk` is available
+## Installation
 
-If unsure whether `mk` is installed for the user, run `mk --help`. If it's missing, build from source in this repo:
+If unsure whether `mk` is installed for the user, run `mk --help`. If it's missing, build from source in the mini-kanban repo:
 
 ```bash
 go build -o ~/bin/mk ./cmd/mk
 ```
 
 The binary is self-contained (pure-Go SQLite, no CGO).
+
+To install this skill into another repo so its agents can find it via Claude Code's project-skill auto-discovery, run from anywhere inside that repo:
+
+```bash
+mk install-skill
+```
+
+It walks up to the git root and writes `.claude/skills/mk/SKILL.md`, creating the directory if needed. The bundled SKILL.md content is the version embedded in the build of `mk` you're running, so re-run after upgrading `mk` to pull doc updates.

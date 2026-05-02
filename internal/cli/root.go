@@ -38,6 +38,7 @@ func NewRoot() *cobra.Command {
 		newUnlinkCmd(),
 		newPRCmd(),
 		newAttachCmd(),
+		newInstallSkillCmd(),
 	)
 	return root
 }
