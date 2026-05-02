@@ -132,3 +132,14 @@ CREATE INDEX IF NOT EXISTS idx_history_repo_time   ON history(repo_id, created_a
 CREATE INDEX IF NOT EXISTS idx_history_actor       ON history(actor);
 CREATE INDEX IF NOT EXISTS idx_history_op          ON history(op);
 CREATE INDEX IF NOT EXISTS idx_history_created_at  ON history(created_at);
+
+-- Per-repo TUI preferences. Generic KV so future toggles (default tab,
+-- saved filters, etc.) don't need a schema change each time. Values are
+-- application-defined strings; the store layer doesn't introspect them.
+CREATE TABLE IF NOT EXISTS tui_settings (
+    repo_id    INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    key        TEXT    NOT NULL,
+    value      TEXT    NOT NULL DEFAULT '',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (repo_id, key)
+);
