@@ -192,6 +192,40 @@ func (s *Store) DeleteIssue(id int64) error {
 	return err
 }
 
+// IssueStateCounts returns a map of state → count for issues in a repo, or
+// across every repo if repoID is nil.
+func (s *Store) IssueStateCounts(repoID *int64) (map[string]int, error) {
+	q := `SELECT state, COUNT(*) FROM issues`
+	args := []any{}
+	if repoID != nil {
+		q += ` WHERE repo_id = ?`
+		args = append(args, *repoID)
+	}
+	q += ` GROUP BY state`
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]int)
+	for rows.Next() {
+		var state string
+		var n int
+		if err := rows.Scan(&state, &n); err != nil {
+			return nil, err
+		}
+		out[state] = n
+	}
+	return out, rows.Err()
+}
+
+// CountFeatures returns the feature count for a repo.
+func (s *Store) CountFeatures(repoID int64) (int, error) {
+	var n int
+	err := s.DB.QueryRow(`SELECT COUNT(*) FROM features WHERE repo_id = ?`, repoID).Scan(&n)
+	return n, err
+}
+
 const issueSelect = `
 SELECT i.id, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slug, ''),
        i.title, i.description, i.state, i.created_at, i.updated_at

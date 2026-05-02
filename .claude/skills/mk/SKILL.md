@@ -46,6 +46,10 @@ mk init [--prefix XXXX]              Bind cwd to a prefix (auto-runs on first
                                      derived prefix)
 mk repo list                         List every tracked repo
 mk repo show [PREFIX]                Show a repo (defaults to cwd's repo)
+mk status                            Show the current repo, DB path, and
+                                     quick stats (feature count + issues
+                                     grouped by state); outside any tracked
+                                     repo it shows the global counts instead
 ```
 
 **Example:**

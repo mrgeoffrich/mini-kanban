@@ -39,6 +39,7 @@ func NewRoot() *cobra.Command {
 		newPRCmd(),
 		newAttachCmd(),
 		newTagCmd(),
+		newStatusCmd(),
 		newInstallSkillCmd(),
 	)
 	return root
