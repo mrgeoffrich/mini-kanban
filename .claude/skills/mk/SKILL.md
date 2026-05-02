@@ -164,6 +164,8 @@ mk unlink MINI-42 MINI-43
 
 Every mutation made via `mk` is appended to a per-DB audit log: who did it, when, against what, and a short detail string. Reads are not logged. The audit table has no foreign keys, so entries survive deletion of the entities they describe.
 
+**Retention is 60 days.** Older entries are pruned automatically on every `mk` invocation, so don't expect long-term forensic history. Snapshot the DB if you need to keep something forever.
+
 ```
 mk history                           Last 50 mutations in the current repo
   --limit N                            Cap output (default 50; 0 = no limit)

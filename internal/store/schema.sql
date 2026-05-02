@@ -128,6 +128,7 @@ CREATE TABLE IF NOT EXISTS history (
     created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_history_repo_time ON history(repo_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_history_actor     ON history(actor);
-CREATE INDEX IF NOT EXISTS idx_history_op        ON history(op);
+CREATE INDEX IF NOT EXISTS idx_history_repo_time   ON history(repo_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_history_actor       ON history(actor);
+CREATE INDEX IF NOT EXISTS idx_history_op          ON history(op);
+CREATE INDEX IF NOT EXISTS idx_history_created_at  ON history(created_at);

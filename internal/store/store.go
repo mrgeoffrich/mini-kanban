@@ -6,9 +6,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
+
+// HistoryRetention bounds how long audit-log entries are kept. Anything
+// older is dropped on every Open() — keeps the table from growing without
+// bound. Tweak here if a longer or shorter retention window is wanted.
+const HistoryRetention = 60 * 24 * time.Hour
 
 //go:embed schema.sql
 var schemaSQL string
@@ -42,7 +48,20 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// History prune runs on every Open. Failures here aren't fatal — the
+	// caller's user-visible work shouldn't fail because retention housekeeping
+	// hit a snag — so we surface a warning and carry on.
+	if err := pruneHistory(db, HistoryRetention); err != nil {
+		fmt.Fprintln(os.Stderr, "mk: warning: history prune failed:", err)
+	}
 	return &Store{DB: db}, nil
+}
+
+// pruneHistory deletes audit-log rows older than retention.
+func pruneHistory(db *sql.DB, retention time.Duration) error {
+	cutoff := time.Now().Add(-retention).UTC().Format("2006-01-02 15:04:05")
+	_, err := db.Exec(`DELETE FROM history WHERE created_at < ?`, cutoff)
+	return err
 }
 
 // migrate brings older databases up to the current schema. SQLite's ALTER
