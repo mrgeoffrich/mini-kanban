@@ -19,6 +19,7 @@ type Feature struct {
 	Title       string    `json:"title"`
 	Description string    `json:"description,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type Issue struct {

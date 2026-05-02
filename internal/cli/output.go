@@ -6,10 +6,17 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"mini-kanban/internal/model"
 	"mini-kanban/internal/store"
 )
+
+// localTime renders a UTC timestamp in the user's local timezone for text
+// output. JSON marshalling uses Go's default RFC 3339 / UTC, untouched.
+func localTime(t time.Time) string {
+	return t.Local().Format("2006-01-02 15:04 MST")
+}
 
 func emit(v any) error {
 	if opts.output == outputJSON {
@@ -30,6 +37,8 @@ func renderText(w io.Writer, v any) error {
 		}
 	case *model.Feature:
 		fmt.Fprintf(w, "%s\t%s\n", x.Slug, x.Title)
+		fmt.Fprintf(w, "Created:  %s\n", localTime(x.CreatedAt))
+		fmt.Fprintf(w, "Updated:  %s\n", localTime(x.UpdatedAt))
 		if x.Description != "" {
 			fmt.Fprintln(w)
 			fmt.Fprintln(w, x.Description)
@@ -51,10 +60,10 @@ func renderText(w io.Writer, v any) error {
 			fmt.Fprintf(w, "%-10s %-12s%s  %s\n", i.Key, i.State, feat, i.Title)
 		}
 	case *model.Comment:
-		fmt.Fprintf(w, "%s — %s\n%s\n", x.Author, x.CreatedAt.Format("2006-01-02 15:04"), x.Body)
+		fmt.Fprintf(w, "%s — %s\n%s\n", x.Author, localTime(x.CreatedAt), x.Body)
 	case []*model.Comment:
 		for _, c := range x {
-			fmt.Fprintf(w, "%s — %s\n%s\n\n", c.Author, c.CreatedAt.Format("2006-01-02 15:04"), c.Body)
+			fmt.Fprintf(w, "%s — %s\n%s\n\n", c.Author, localTime(c.CreatedAt), c.Body)
 		}
 	case *model.PullRequest:
 		fmt.Fprintln(w, x.URL)
@@ -86,6 +95,7 @@ func printRepo(w io.Writer, r *model.Repo) error {
 		fmt.Fprintf(w, "Remote:    %s\n", r.RemoteURL)
 	}
 	fmt.Fprintf(w, "NextIssue: %s-%d\n", r.Prefix, r.NextIssueNumber)
+	fmt.Fprintf(w, "Created:   %s\n", localTime(r.CreatedAt))
 	return nil
 }
 
@@ -95,6 +105,8 @@ func printIssue(w io.Writer, i *model.Issue) error {
 	if i.FeatureSlug != "" {
 		fmt.Fprintf(w, "Feature:  %s\n", i.FeatureSlug)
 	}
+	fmt.Fprintf(w, "Created:  %s\n", localTime(i.CreatedAt))
+	fmt.Fprintf(w, "Updated:  %s\n", localTime(i.UpdatedAt))
 	if i.Description != "" {
 		fmt.Fprintf(w, "\n%s\n", i.Description)
 	}
@@ -137,7 +149,7 @@ func printIssueView(w io.Writer, v *issueView) error {
 		fmt.Fprintln(w, "Comments:")
 		fmt.Fprintln(w, strings.Repeat("-", 40))
 		for _, c := range v.Comments {
-			fmt.Fprintf(w, "%s — %s\n%s\n\n", c.Author, c.CreatedAt.Format("2006-01-02 15:04"), c.Body)
+			fmt.Fprintf(w, "%s — %s\n%s\n\n", c.Author, localTime(c.CreatedAt), c.Body)
 		}
 	}
 	return nil
@@ -145,6 +157,7 @@ func printIssueView(w io.Writer, v *issueView) error {
 
 func printAttachment(w io.Writer, a *model.Attachment) {
 	fmt.Fprintf(w, "%s\t%d bytes\n", a.Filename, a.SizeBytes)
+	fmt.Fprintf(w, "Created: %s\n", localTime(a.CreatedAt))
 	if a.Content != "" {
 		fmt.Fprintln(w)
 		fmt.Fprint(w, a.Content)
