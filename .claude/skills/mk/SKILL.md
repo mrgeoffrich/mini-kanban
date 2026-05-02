@@ -25,6 +25,7 @@ description: Use this skill whenever you need to create, read, update, or organi
 
 - **Working directory matters.** Most commands resolve the repo from `cwd`. `cd` to the repo before running unless using `--all-repos` (only on `issue list`).
 - **Output format.** Default is human-readable text. Pass `-o json` (alias `--output json`) for structured output — use this when parsing.
+- **Timestamps.** Repos, features, issues, attachments and comments all carry a `created_at`; features and issues additionally have `updated_at` (bumped automatically on edits / state changes). In JSON they're UTC RFC 3339 (e.g. `2026-05-03T07:27:14Z`) — that is the parsing contract. In text mode they render in the user's local timezone (`2026-05-03 17:27 AEST`). Attachments are immutable, so they only have `created_at`.
 - **Long-text inputs.** Description and comment body MUST come from a file (`--description-file path.md`) or stdin (`--description -`). There is no inline editor. For multi-line descriptions/comments, write to a temp file or pipe via `printf`/heredoc.
 - **Identifiers.**
   - Issue keys: `PREFIX-N` (e.g. `MINI-42`). Any 4 alnum chars + `-` + digits.
