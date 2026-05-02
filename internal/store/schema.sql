@@ -69,22 +69,6 @@ CREATE TABLE IF NOT EXISTS issue_pull_requests (
 
 CREATE INDEX IF NOT EXISTS idx_prs_issue ON issue_pull_requests(issue_id);
 
-CREATE TABLE IF NOT EXISTS attachments (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    issue_id   INTEGER REFERENCES issues(id)   ON DELETE CASCADE,
-    feature_id INTEGER REFERENCES features(id) ON DELETE CASCADE,
-    filename   TEXT    NOT NULL,
-    content    TEXT    NOT NULL,
-    size_bytes INTEGER NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CHECK ((issue_id IS NULL) <> (feature_id IS NULL)),
-    UNIQUE(issue_id,   filename),
-    UNIQUE(feature_id, filename)
-);
-
-CREATE INDEX IF NOT EXISTS idx_attachments_issue   ON attachments(issue_id);
-CREATE INDEX IF NOT EXISTS idx_attachments_feature ON attachments(feature_id);
-
 CREATE TABLE IF NOT EXISTS issue_tags (
     issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
     tag      TEXT    NOT NULL,

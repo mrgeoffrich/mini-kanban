@@ -13,7 +13,14 @@ import (
 	"mini-kanban/internal/store"
 )
 
-var docFilenameRe = regexp.MustCompile(`^[^/\\\x00]+$`)
+var (
+	docFilenameRe = regexp.MustCompile(`^[^/\\\x00]+$`)
+	issueKeyShape = regexp.MustCompile(`^[A-Za-z0-9]{4}-\d+$`)
+)
+
+// isIssueKey reports whether s has the PREFIX-N shape, used to disambiguate
+// "issue or feature?" positionals on commands like `mk doc link`.
+func isIssueKey(s string) bool { return issueKeyShape.MatchString(s) }
 
 func validateDocFilename(name string) (string, error) {
 	name = strings.TrimSpace(name)

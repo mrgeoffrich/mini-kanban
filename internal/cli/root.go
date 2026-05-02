@@ -39,7 +39,6 @@ func NewRoot() *cobra.Command {
 		newLinkCmd(),
 		newUnlinkCmd(),
 		newPRCmd(),
-		newAttachCmd(),
 		newTagCmd(),
 		newDocCmd(),
 		newStatusCmd(),

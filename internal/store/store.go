@@ -63,6 +63,12 @@ func migrate(db *sql.DB) error {
 			return err
 		}
 	}
+	// The attachments feature was removed in favour of documents; drop the
+	// table from any pre-existing DB. Historical history.attachment.* rows
+	// stay put since the audit log is append-only.
+	if _, err := db.Exec(`DROP TABLE IF EXISTS attachments`); err != nil {
+		return err
+	}
 	return nil
 }
 

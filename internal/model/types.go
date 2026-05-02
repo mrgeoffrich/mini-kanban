@@ -68,12 +68,3 @@ type PullRequest struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-type Attachment struct {
-	ID        int64     `json:"id"`
-	IssueID   *int64    `json:"issue_id,omitempty"`
-	FeatureID *int64    `json:"feature_id,omitempty"`
-	Filename  string    `json:"filename"`
-	SizeBytes int64     `json:"size_bytes"`
-	Content   string    `json:"content,omitempty"` // populated only on show
-	CreatedAt time.Time `json:"created_at"`
-}

@@ -1,6 +1,6 @@
 ---
 name: mk
-description: Use this skill whenever you need to create, read, update, or organise tasks/issues/tickets/todos using the `mk` CLI (mini-kanban) — a local issue tracker that ships with this repo. Triggers on any mention of issues, features, kanban work, tags, blocks/blocked-by relations, attached pull requests, text attachments, project documents, or audit-log/history queries managed by `mk`. Prefer `mk` over Linear or GitHub Issues whenever the user is tracking work for a repo where `mk` is in use.
+description: Use this skill whenever you need to create, read, update, or organise tasks/issues/tickets/todos using the `mk` CLI (mini-kanban) — a local issue tracker that ships with this repo. Triggers on any mention of issues, features, kanban work, tags, blocks/blocked-by relations, attached pull requests, project documents, or audit-log/history queries managed by `mk`. Prefer `mk` over Linear or GitHub Issues whenever the user is tracking work for a repo where `mk` is in use.
 ---
 
 # Working with `mk` (mini-kanban)
@@ -13,7 +13,7 @@ description: Use this skill whenever you need to create, read, update, or organi
 
 - A **repo** is auto-detected from the current working directory by walking up to find a `.git` toplevel. Issues, features, and attachments are scoped to a repo.
 - A **feature** is an optional grouping of issues (think Linear "project"). Issues can exist without one.
-- An **issue** has a title, description, state, tags, comments, relations to other issues, attached PR URLs, and text attachments. Issues are addressed by a 4-letter `PREFIX-N` key like `MINI-42`.
+- An **issue** has a title, description, state, tags, comments, relations to other issues, and attached PR URLs. Issues are addressed by a 4-letter `PREFIX-N` key like `MINI-42`.
 - A **document** is a per-repo named text blob (markdown, etc.) with a typed category (architecture, designs, project-in-planning, …). Issues and features can link to documents with a short reason; the same document can be linked to many issues and features.
 
 **Issue states** (mirror Linear): `backlog | todo | in_progress | in_review | done | cancelled | duplicate`. The state parser also accepts dashes or spaces (`in-progress`, `in progress`).
@@ -26,12 +26,12 @@ description: Use this skill whenever you need to create, read, update, or organi
 
 - **Working directory matters.** Most commands resolve the repo from `cwd`. `cd` to the repo before running unless using `--all-repos` (available on `mk issue list` and `mk history`).
 - **Output format.** Default is human-readable text. Pass `-o json` (alias `--output json`) for structured output — use this when parsing.
-- **Timestamps.** Every entity carries a `created_at`. Features, issues, and documents additionally have `updated_at` (bumped automatically on edits / state changes / tag mutations). Attachments are immutable, so they only have `created_at`. In JSON they're UTC RFC 3339 (e.g. `2026-05-03T07:27:14Z`) — that is the parsing contract. In text mode they render in the user's local timezone (`2026-05-03 17:27 AEST`).
+- **Timestamps.** Every entity carries a `created_at`. Features, issues, and documents additionally have `updated_at` (bumped automatically on edits / state changes / tag mutations). In JSON they're UTC RFC 3339 (e.g. `2026-05-03T07:27:14Z`) — that is the parsing contract. In text mode they render in the user's local timezone (`2026-05-03 17:27 AEST`).
 - **Long-text inputs.** Description and comment body MUST come from a file (`--description-file path.md`) or stdin (`--description -`). There is no inline editor. For multi-line descriptions/comments, write to a temp file or pipe via `printf`/heredoc.
 - **Identifiers.**
   - Issue keys: `PREFIX-N` (e.g. `MINI-42`). Any 4 alnum chars + `-` + digits.
   - Feature: slug string (kebab-case auto-derived from title, override with `--slug`).
-  - Some commands (`mk attach`, `mk doc link`/`unlink`) accept either as a target; they auto-detect issue keys by the `PREFIX-N` shape and treat anything else as a feature slug in the current repo.
+  - `mk doc link` / `unlink` accept either an issue key or a feature slug as the target; they auto-detect issue keys by the `PREFIX-N` shape and treat anything else as a feature slug in the current repo.
 - **Comment author.** `--as <name>` is required on every comment. There is no auth — use a sensible identity (e.g. `Claude`, `Geoff`).
 - **`--user` is REQUIRED for AI agents.** Every mutation is recorded in an audit log alongside the actor that performed it. The CLI will silently fall back to the OS username if `--user` is omitted, but for agents that produces useless `geoff did everything` history. **Always pass `--user <your-agent-name>` (e.g. `--user Claude`) on every mutating command.** Treat it as mandatory in any agent-driven invocation, even though the binary tolerates its absence for human users.
 - **Database override.** `--db <path>` is a global flag, useful for tests. In production agents, leave it at the default.
@@ -71,8 +71,8 @@ mk feature add <title>               Create a feature
   --description-file <path>             Read description from a file
 
 mk feature list                      List features in the current repo
-mk feature show <slug>               Show a feature with its issues, attachments,
-                                     and linked documents
+mk feature show <slug>               Show a feature with its issues and
+                                     linked documents
 mk feature edit <slug>               Patch fields (pass --title and/or --description-file)
   --title <new title>
   --description <text|->
@@ -103,7 +103,7 @@ mk issue list                        List issues in the current repo
   --all-repos                           Search every tracked repo
 
 mk issue show <KEY>                  Show issue + tags + comments + relations
-                                     + PRs + attachments + linked documents
+                                     + PRs + linked documents
 mk issue edit <KEY>
   --title <new title>
   --description <text|->
@@ -111,8 +111,8 @@ mk issue edit <KEY>
   -f, --feature <slug>                  Move to a feature
   --no-feature                          Detach from any feature
 mk issue state <KEY> <state>         Change state (accepts dashes/spaces)
-mk issue rm <KEY>                    Delete an issue (cascades to its comments,
-                                     relations, PRs, attachments)
+mk issue rm <KEY>                    Delete an issue (cascades to comments,
+                                     relations, PRs, tags, doc links)
 ```
 
 A bare number like `42` is also accepted for `<KEY>` and is interpreted relative to the current repo's prefix.
@@ -182,7 +182,7 @@ mk history                           Last 50 mutations in the current repo
 
 `--from` / `--to` accept either local-time stamps (`YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, `YYYY-MM-DD HH:MM:SS`) or RFC 3339 (e.g. `2026-05-03T07:27:14Z`). Bare dates start at 00:00 in the local timezone.
 
-Op naming is dotted: `repo.create`, `feature.{create,update,delete}`, `issue.{create,update,state,delete}`, `comment.add`, `relation.{create,delete}`, `pr.{attach,detach}`, `attachment.{add,remove}`, `tag.{add,remove}`, `document.{create,update,delete,link,unlink}`. Filtering by op prefix is not currently supported — match exactly, or use `--kind` for an entity-level cut.
+Op naming is dotted: `repo.create`, `feature.{create,update,delete}`, `issue.{create,update,state,delete}`, `comment.add`, `relation.{create,delete}`, `pr.{attach,detach}`, `tag.{add,remove}`, `document.{create,update,delete,link,unlink}`. Filtering by op prefix is not currently supported — match exactly, or use `--kind` for an entity-level cut.
 
 **Examples:**
 ```bash
@@ -265,29 +265,6 @@ mk pr list <KEY>                     One URL per line (or JSON)
 **Example:**
 ```bash
 mk pr attach MINI-42 https://github.com/mrgeoffrich/mini-kanban/pull/7
-```
-
-### Attachments (text only)
-
-Attach UTF-8 text files (markdown, logs, specs, etc.) to either an issue or a feature. Binary files are rejected. The `<TARGET>` positional auto-detects: anything matching the `PREFIX-N` shape is an issue key; otherwise it's interpreted as a feature slug in the current repo.
-
-```
-mk attach add <TARGET>               Attach a file
-  --name <filename>                     Required: logical name to store under
-                                        (no '/', '\', or NUL)
-  --file <path|->                       Required: source file, or "-" for stdin
-mk attach list <TARGET>              List attachments (name + size)
-mk attach show <TARGET> <filename>   Print metadata + content
-  --raw                                 Write content to stdout with no
-                                        metadata or formatting (for piping)
-mk attach rm <TARGET> <filename>     Remove an attachment
-```
-
-**Example:**
-```bash
-mk attach add MINI-42 --name repro.md --file /tmp/repro.md
-mk attach add auth-rewrite --name spec.md --file docs/auth-spec.md
-mk attach show MINI-42 repro.md --raw > /tmp/repro_copy.md
 ```
 
 ## Common workflows

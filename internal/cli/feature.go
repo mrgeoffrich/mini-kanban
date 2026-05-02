@@ -106,15 +106,11 @@ func featureShowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			atts, err := s.ListAttachments(store.AttachmentTarget{FeatureID: &f.ID})
-			if err != nil {
-				return err
-			}
 			docs, err := s.ListDocumentsLinkedToFeature(f.ID)
 			if err != nil {
 				return err
 			}
-			return emit(&featureView{Feature: f, Issues: issues, Attachments: atts, Documents: docs})
+			return emit(&featureView{Feature: f, Issues: issues, Documents: docs})
 		},
 	}
 }
