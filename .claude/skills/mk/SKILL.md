@@ -164,20 +164,32 @@ Every mutation made via `mk` is appended to a per-DB audit log: who did it, when
 
 ```
 mk history                           Last 50 mutations in the current repo
-  --limit N                            Cap output (0 for no limit)
+  --limit N                            Cap output (default 50; 0 = no limit)
+  --offset N                           Skip the first N entries (pagination)
+  --oldest-first                       Reverse the default newest-first order
   --user-filter <name>                 Only entries by this actor
   --op <op>                            Exact op match (e.g. issue.state)
+  --kind <kind>                        Filter by entity kind: issue, feature,
+                                       document, or repo
   --since <duration>                   Look back this far: 30m, 1h, 1d, 2w
+  --from <timestamp>                   Inclusive lower bound (mutually
+                                       exclusive with --since)
+  --to   <timestamp>                   Inclusive upper bound
   --all-repos                          Include every repo
 ```
 
-Op naming is dotted: `repo.create`, `feature.{create,update,delete}`, `issue.{create,update,state,delete}`, `comment.add`, `relation.{create,delete}`, `pr.{attach,detach}`, `attachment.{add,remove}`, `tag.{add,remove}`, `document.{create,update,delete,link,unlink}`. Filtering by op prefix is not currently supported — match exactly.
+`--from` / `--to` accept either local-time stamps (`YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, `YYYY-MM-DD HH:MM:SS`) or RFC 3339 (e.g. `2026-05-03T07:27:14Z`). Bare dates start at 00:00 in the local timezone.
 
-**Example:**
+Op naming is dotted: `repo.create`, `feature.{create,update,delete}`, `issue.{create,update,state,delete}`, `comment.add`, `relation.{create,delete}`, `pr.{attach,detach}`, `attachment.{add,remove}`, `tag.{add,remove}`, `document.{create,update,delete,link,unlink}`. Filtering by op prefix is not currently supported — match exactly, or use `--kind` for an entity-level cut.
+
+**Examples:**
 ```bash
-mk history --since 1d                 # what changed today
-mk history --user-filter Claude --op issue.create
-mk history --op issue.state --since 1w
+mk history --since 1d                                  # last 24h
+mk history --user-filter Claude --op issue.create      # what Claude filed
+mk history --kind document --since 1w                  # all doc activity this week
+mk history --from 2026-05-01 --to 2026-05-03           # absolute range
+mk history --oldest-first --since 1d                   # chronological replay
+mk history --limit 25 --offset 25                      # second page
 ```
 
 ### Documents

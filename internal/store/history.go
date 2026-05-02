@@ -28,11 +28,15 @@ func (s *Store) RecordHistory(e model.HistoryEntry) error {
 }
 
 type HistoryFilter struct {
-	RepoID *int64
-	Actor  string
-	Op     string
-	Since  *time.Time
-	Limit  int
+	RepoID      *int64
+	Actor       string
+	Op          string
+	Kind        string
+	From        *time.Time // inclusive lower bound
+	To          *time.Time // inclusive upper bound
+	Limit       int
+	Offset      int
+	OldestFirst bool
 }
 
 func (s *Store) ListHistory(f HistoryFilter) ([]*model.HistoryEntry, error) {
@@ -55,16 +59,31 @@ func (s *Store) ListHistory(f HistoryFilter) ([]*model.HistoryEntry, error) {
 		where = append(where, "op = ?")
 		args = append(args, f.Op)
 	}
-	if f.Since != nil {
+	if f.Kind != "" {
+		where = append(where, "kind = ?")
+		args = append(args, f.Kind)
+	}
+	if f.From != nil {
 		where = append(where, "created_at >= ?")
-		args = append(args, f.Since.UTC().Format("2006-01-02 15:04:05"))
+		args = append(args, f.From.UTC().Format("2006-01-02 15:04:05"))
+	}
+	if f.To != nil {
+		where = append(where, "created_at <= ?")
+		args = append(args, f.To.UTC().Format("2006-01-02 15:04:05"))
 	}
 	if len(where) > 0 {
 		q += " WHERE " + strings.Join(where, " AND ")
 	}
-	q += " ORDER BY created_at DESC, id DESC"
+	if f.OldestFirst {
+		q += " ORDER BY created_at ASC, id ASC"
+	} else {
+		q += " ORDER BY created_at DESC, id DESC"
+	}
 	if f.Limit > 0 {
 		q += fmt.Sprintf(" LIMIT %d", f.Limit)
+	}
+	if f.Offset > 0 {
+		q += fmt.Sprintf(" OFFSET %d", f.Offset)
 	}
 
 	rows, err := s.DB.Query(q, args...)
