@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"mini-kanban/internal/git"
-	"mini-kanban/internal/model"
-	"mini-kanban/internal/store"
+	"github.com/mrgeoffrich/mini-kanban/internal/git"
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
 
 // auto-register a repo on first use. Each call site records its own

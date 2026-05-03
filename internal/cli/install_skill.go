@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	root "mini-kanban"
-	"mini-kanban/internal/git"
+	root "github.com/mrgeoffrich/mini-kanban"
+	"github.com/mrgeoffrich/mini-kanban/internal/git"
 )
 
 func newInstallSkillCmd() *cobra.Command {

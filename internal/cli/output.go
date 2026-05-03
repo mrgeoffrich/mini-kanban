@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"mini-kanban/internal/model"
-	"mini-kanban/internal/store"
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
 
 // localTime renders a UTC timestamp in the user's local timezone for text

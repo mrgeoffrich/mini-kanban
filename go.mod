@@ -1,4 +1,4 @@
-module mini-kanban
+module github.com/mrgeoffrich/mini-kanban
 
 go 1.25.0
 

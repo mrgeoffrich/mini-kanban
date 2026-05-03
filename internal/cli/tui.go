@@ -3,7 +3,7 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
-	"mini-kanban/internal/tui"
+	"github.com/mrgeoffrich/mini-kanban/internal/tui"
 )
 
 func newTUICmd() *cobra.Command {

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
 )
 
 var ErrDocumentExists = errors.New("a document with that filename already exists in this repo")

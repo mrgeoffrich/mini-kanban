@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
 )
 
 func (s *Store) CreateComment(issueID int64, author, body string) (*model.Comment, error) {

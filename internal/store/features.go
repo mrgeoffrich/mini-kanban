@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
 )
 
 var slugRe = regexp.MustCompile(`[^a-z0-9]+`)

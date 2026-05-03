@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
 )
 
 var ErrNotFound = errors.New("not found")

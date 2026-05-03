@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
 )
 
 var ErrPRAlreadyAttached = errors.New("PR already attached to this issue")

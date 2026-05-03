@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"mini-kanban/internal/model"
-	"mini-kanban/internal/store"
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
 
 // SnapshotOpts controls non-interactive rendering for layout debugging.

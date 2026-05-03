@@ -6,8 +6,8 @@ import (
 	osuser "os/user"
 	"strings"
 
-	"mini-kanban/internal/model"
-	"mini-kanban/internal/store"
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
 
 // actor returns the resolved name for who is performing the operation.

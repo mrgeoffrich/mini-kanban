@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
 )
 
 func newTestStore(t *testing.T) *Store {

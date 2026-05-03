@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
 )
 
 var issueKeyRe = regexp.MustCompile(`^([A-Za-z0-9]{4})-(\d+)$`)

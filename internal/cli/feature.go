@@ -5,8 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"mini-kanban/internal/model"
-	"mini-kanban/internal/store"
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
 
 func newFeatureCmd() *cobra.Command {

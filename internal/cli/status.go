@@ -8,9 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"mini-kanban/internal/git"
-	"mini-kanban/internal/model"
-	"mini-kanban/internal/store"
+	"github.com/mrgeoffrich/mini-kanban/internal/git"
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
 
 // statusReport is the unified shape returned by `mk status`. Inside a git

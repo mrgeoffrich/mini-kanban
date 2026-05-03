@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
 )
 
 func (s *Store) CreateRelation(fromID, toID int64, t model.RelationType) error {

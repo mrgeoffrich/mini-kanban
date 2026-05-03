@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"mini-kanban/internal/store"
+	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
 
 // parseLookback extends time.ParseDuration with day (d) and week (w) units.

@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
 )
 
 func parseRelType(s string) (model.RelationType, error) {

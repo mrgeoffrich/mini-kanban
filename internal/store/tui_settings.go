@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
 )
 
 // Generic per-repo KV used by the TUI. Keep keys namespaced (e.g.

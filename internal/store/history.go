@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
 )
 
 // RecordHistory inserts an audit-log row. Fields beyond Actor and Op are

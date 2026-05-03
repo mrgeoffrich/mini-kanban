@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"mini-kanban/internal/cli"
+	"github.com/mrgeoffrich/mini-kanban/internal/cli"
 )
 
 func main() {
