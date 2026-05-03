@@ -284,7 +284,8 @@ func (d *docsView) renderPreview(width, height int) string {
 }
 
 func (d *docsView) viewOverlay(width, height int) string {
-	innerWidth := width - 4
+	// Box uses Padding(1, 2): true content area = (width-2) - 4 = width-6.
+	innerWidth := width - 6
 	if innerWidth < 20 {
 		innerWidth = 20
 	}

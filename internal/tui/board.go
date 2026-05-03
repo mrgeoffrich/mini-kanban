@@ -749,7 +749,9 @@ func (b *boardView) renderDetail(width, height int) string {
 //   - bottom ~30% — two side-by-side panes: comments (left) | attachments
 //     (right), each clipped to fit with a "+N more" hint when overflowing.
 func (b *boardView) viewOverlay(width, height int) string {
-	innerWidth := width - 4
+	// Box uses Padding(1, 2): 2 cols of horizontal padding on each side
+	// inside Width(width-2). True content area = (width-2) - 4 = width-6.
+	innerWidth := width - 6
 	if innerWidth < 20 {
 		innerWidth = 20
 	}
