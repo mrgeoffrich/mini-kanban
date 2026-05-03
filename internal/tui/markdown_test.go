@@ -7,7 +7,7 @@ import (
 )
 
 // sampleMarkdown is a representative description body — headings, bold,
-// lists, code, blockquote, links — sized like a long mini-infra issue.
+// lists, code, blockquote, links — sized like a long planning doc.
 var sampleMarkdown = strings.Repeat(`# Phase Heading
 
 Some prose explaining the phase. *Imported from upstream tracker.*
@@ -36,15 +36,14 @@ incididunt ut labore et dolore magna aliqua.
 
 `, 6) // ~6 KB of representative markdown
 
-// loadLargeMarkdown reads a real mini-infra design doc as the worst-case
-// test fixture (~59 KB). The benchmark is skipped when the file isn't
-// present (e.g. CI without the sibling repo). Override the path with
-// MK_BENCH_MD if you want to point at your own large file.
+// loadLargeMarkdown reads a real on-disk design doc as the worst-case test
+// fixture (typically ~50 KB+). It's skipped by default — set MK_BENCH_MD to
+// the absolute path of any large markdown file to opt in.
 func loadLargeMarkdown(b *testing.B) string {
 	b.Helper()
 	path := os.Getenv("MK_BENCH_MD")
 	if path == "" {
-		path = "/Users/geoff/Repos/mini-infra/docs/planning/not-shipped/service-addons-plan.md"
+		b.Skip("MK_BENCH_MD not set; pointing it at a large markdown file enables this benchmark")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

@@ -33,7 +33,7 @@ description: Use this skill whenever you need to create, read, update, or organi
   - Feature: slug string (kebab-case auto-derived from title, override with `--slug`).
   - `mk doc link` / `unlink` accept either an issue key or a feature slug as the target; they auto-detect issue keys by the `PREFIX-N` shape and treat anything else as a feature slug in the current repo.
 - **Comment author.** `--as <name>` is required on every comment. There is no auth — use a sensible identity (e.g. `Claude`, `Geoff`).
-- **`--user` is REQUIRED for AI agents.** Every mutation is recorded in an audit log alongside the actor that performed it. The CLI will silently fall back to the OS username if `--user` is omitted, but for agents that produces useless `geoff did everything` history. **Always pass `--user <your-agent-name>` (e.g. `--user Claude`) on every mutating command.** Treat it as mandatory in any agent-driven invocation, even though the binary tolerates its absence for human users.
+- **`--user` is REQUIRED for AI agents.** Every mutation is recorded in an audit log alongside the actor that performed it. The CLI will silently fall back to the OS username if `--user` is omitted, but for agents that produces useless `<your-os-user> did everything` history. **Always pass `--user <your-agent-name>` (e.g. `--user Claude`) on every mutating command.** Treat it as mandatory in any agent-driven invocation, even though the binary tolerates its absence for human users.
 - **Database override.** `--db <path>` is a global flag, useful for tests. In production agents, leave it at the default.
 
 ## Command reference
@@ -328,7 +328,7 @@ mk pr list <KEY>                     One URL per line (or JSON)
 
 **Example:**
 ```bash
-mk pr attach MINI-42 https://github.com/mrgeoffrich/mini-kanban/pull/7
+mk pr attach MINI-42 https://github.com/owner/repo/pull/7
 ```
 
 ## Common workflows
