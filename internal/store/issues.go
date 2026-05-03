@@ -205,6 +205,41 @@ func (s *Store) SetIssueAssignee(id int64, assignee string) error {
 	return err
 }
 
+// nextCandidateQ picks the lowest-numbered ready issue in a feature: state='todo',
+// no assignee, and every `blocks`-blocker in a terminal state. Shared between
+// PeekNextIssue (read-only) and ClaimNextIssue (claim).
+const nextCandidateQ = `
+	SELECT i.id
+	FROM issues i
+	WHERE i.repo_id = ?
+	  AND i.feature_id = ?
+	  AND i.state = 'todo'
+	  AND i.assignee = ''
+	  AND NOT EXISTS (
+	    SELECT 1
+	    FROM issue_relations ir
+	    JOIN issues b ON b.id = ir.from_issue_id
+	    WHERE ir.type = 'blocks'
+	      AND ir.to_issue_id = i.id
+	      AND b.state NOT IN ('done','cancelled','duplicate')
+	  )
+	ORDER BY i.number
+	LIMIT 1`
+
+// PeekNextIssue returns the issue ClaimNextIssue would pick, without mutating
+// state. Returns nil, nil when nothing is currently claimable.
+func (s *Store) PeekNextIssue(repoID int64, featureID int64) (*model.Issue, error) {
+	var id int64
+	err := s.DB.QueryRow(nextCandidateQ, repoID, featureID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.GetIssueByID(id)
+}
+
 // ClaimNextIssue atomically picks the next ready issue in a feature and flips
 // it to in_progress with the given assignee. "Ready" means: state='todo',
 // assignee='', and every `blocks`-blocker is in a terminal state
@@ -224,26 +259,8 @@ func (s *Store) ClaimNextIssue(repoID int64, featureID int64, assignee string) (
 	}
 	defer tx.Rollback()
 
-	const candidateQ = `
-		SELECT i.id
-		FROM issues i
-		WHERE i.repo_id = ?
-		  AND i.feature_id = ?
-		  AND i.state = 'todo'
-		  AND i.assignee = ''
-		  AND NOT EXISTS (
-		    SELECT 1
-		    FROM issue_relations ir
-		    JOIN issues b ON b.id = ir.from_issue_id
-		    WHERE ir.type = 'blocks'
-		      AND ir.to_issue_id = i.id
-		      AND b.state NOT IN ('done','cancelled','duplicate')
-		  )
-		ORDER BY i.number
-		LIMIT 1`
-
 	var id int64
-	err = tx.QueryRow(candidateQ, repoID, featureID).Scan(&id)
+	err = tx.QueryRow(nextCandidateQ, repoID, featureID).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}

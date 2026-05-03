@@ -145,6 +145,10 @@ mk issue next --feature <slug>       Atomically claim the next ready issue
                                      nothing is currently claimable —
                                      callers should poll/retry rather
                                      than treat that as an error.
+mk issue peek --feature <slug>       Read-only counterpart to `next`:
+                                     shows what `next` would claim
+                                     without mutating state. Same empty
+                                     result shape when nothing is ready.
 mk issue rm <KEY>                    Delete an issue (cascades to comments,
                                      relations, PRs, tags, doc links)
 ```

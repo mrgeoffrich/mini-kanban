@@ -24,6 +24,7 @@ func newIssueCmd() *cobra.Command {
 		issueAssignCmd(),
 		issueUnassignCmd(),
 		issueNextCmd(),
+		issuePeekCmd(),
 		issueRmCmd(),
 	)
 	return cmd
@@ -649,6 +650,46 @@ identity instead of the OS username.`,
 		},
 	}
 	cmd.Flags().StringVarP(&featureSlug, "feature", "f", "", "feature slug to pull from (required)")
+	return cmd
+}
+
+func issuePeekCmd() *cobra.Command {
+	var featureSlug string
+	cmd := &cobra.Command{
+		Use:   "peek",
+		Short: "Show the next ready issue in a feature without claiming it",
+		Long: `Read-only counterpart to ` + "`mk issue next`" + `: returns the same issue
+the claim would pick (lowest-numbered todo with all blockers
+done/cancelled/duplicate and no assignee) but does not mutate state.
+
+Emits an empty result with exit code 0 when nothing is currently
+claimable, matching the shape of ` + "`mk issue next`" + `.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if featureSlug == "" {
+				return fmt.Errorf("--feature is required")
+			}
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+			repo, err := resolveRepo(s)
+			if err != nil {
+				return err
+			}
+			feat, err := s.GetFeatureBySlug(repo.ID, featureSlug)
+			if err != nil {
+				return fmt.Errorf("feature %q: %w", featureSlug, err)
+			}
+			iss, err := s.PeekNextIssue(repo.ID, feat.ID)
+			if err != nil {
+				return err
+			}
+			return emit(&claimResult{Issue: iss})
+		},
+	}
+	cmd.Flags().StringVarP(&featureSlug, "feature", "f", "", "feature slug to peek into (required)")
 	return cmd
 }
 
