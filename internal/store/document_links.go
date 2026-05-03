@@ -127,7 +127,7 @@ func (s *Store) ListDocumentsLinkedToFeature(featureID int64) ([]*model.Document
 }
 
 const docLinkSelect = `
-SELECT dl.id, dl.document_id, d.filename,
+SELECT dl.id, dl.document_id, d.filename, d.type,
        dl.issue_id, COALESCE(r.prefix || '-' || i.number, '') AS issue_key,
        dl.feature_id, COALESCE(f.slug, '') AS feature_slug,
        dl.description, dl.created_at
@@ -140,12 +140,13 @@ LEFT JOIN features f ON f.id = dl.feature_id`
 func scanDocumentLink(row rowScanner) (*model.DocumentLink, error) {
 	var (
 		l         model.DocumentLink
+		docType   string
 		issueID   sql.NullInt64
 		featureID sql.NullInt64
 		issueKey  string
 		featSlug  string
 	)
-	err := row.Scan(&l.ID, &l.DocumentID, &l.DocumentFilename,
+	err := row.Scan(&l.ID, &l.DocumentID, &l.DocumentFilename, &docType,
 		&issueID, &issueKey, &featureID, &featSlug,
 		&l.Description, &l.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -154,6 +155,7 @@ func scanDocumentLink(row rowScanner) (*model.DocumentLink, error) {
 	if err != nil {
 		return nil, fmt.Errorf("scan document link: %w", err)
 	}
+	l.DocumentType = model.DocumentType(docType)
 	if issueID.Valid {
 		v := issueID.Int64
 		l.IssueID = &v

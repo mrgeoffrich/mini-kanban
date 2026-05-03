@@ -90,6 +90,31 @@ func (s *Store) UpdateDocument(id int64, newType *model.DocumentType, newContent
 	return err
 }
 
+// RenameDocument changes a document's filename in place — the row id is
+// preserved, so document_links rows stay intact. Optionally updates the
+// type at the same time. Returns ErrDocumentExists on filename collision.
+func (s *Store) RenameDocument(id int64, newFilename string, newType *model.DocumentType) error {
+	sets := []string{"filename = ?"}
+	args := []any{newFilename}
+	if newType != nil {
+		sets = append(sets, "type = ?")
+		args = append(args, string(*newType))
+	}
+	sets = append(sets, "updated_at = CURRENT_TIMESTAMP")
+	args = append(args, id)
+	_, err := s.DB.Exec(
+		fmt.Sprintf(`UPDATE documents SET %s WHERE id = ?`, strings.Join(sets, ", ")),
+		args...,
+	)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return ErrDocumentExists
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *Store) DeleteDocument(id int64) error {
 	_, err := s.DB.Exec(`DELETE FROM documents WHERE id = ?`, id)
 	return err

@@ -168,11 +168,7 @@ func printIssueView(w io.Writer, v *issueView) error {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "Linked documents:")
 		for _, l := range v.Documents {
-			if l.Description != "" {
-				fmt.Fprintf(w, "  %s — %s\n", l.DocumentFilename, l.Description)
-			} else {
-				fmt.Fprintf(w, "  %s\n", l.DocumentFilename)
-			}
+			printDocLinkInEntityContext(w, l)
 		}
 	}
 	if len(v.Comments) > 0 {
@@ -206,19 +202,30 @@ func printFeatureView(w io.Writer, v *featureView) error {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "Linked documents:")
 		for _, l := range v.Documents {
-			if l.Description != "" {
-				fmt.Fprintf(w, "  %s — %s\n", l.DocumentFilename, l.Description)
-			} else {
-				fmt.Fprintf(w, "  %s\n", l.DocumentFilename)
-			}
+			printDocLinkInEntityContext(w, l)
 		}
 	}
 	return nil
 }
 
+// printDocLinkInEntityContext renders one doc link from the perspective of an
+// issue or feature: filename + type, with the optional --why description.
+// The link's target is implicit (it's the issue/feature being shown).
+func printDocLinkInEntityContext(w io.Writer, l *model.DocumentLink) {
+	label := l.DocumentFilename
+	if l.DocumentType != "" {
+		label = fmt.Sprintf("%s (%s)", label, l.DocumentType)
+	}
+	if l.Description != "" {
+		fmt.Fprintf(w, "  %s — %s\n", label, l.Description)
+	} else {
+		fmt.Fprintf(w, "  %s\n", label)
+	}
+}
+
 type docView struct {
-	Document *model.Document        `json:"document"`
-	Links    []*model.DocumentLink  `json:"links"`
+	Document *model.Document       `json:"document"`
+	Links    []*model.DocumentLink `json:"links"`
 }
 
 func printDocument(w io.Writer, d *model.Document) {

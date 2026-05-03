@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -36,36 +38,120 @@ func validateDocFilename(name string) (string, error) {
 func newDocCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "doc", Short: "Manage per-repo text documents and their links to issues/features"}
 	cmd.AddCommand(
-		docAddCmd(), docListCmd(), docShowCmd(),
-		docEditCmd(), docRmCmd(),
+		docAddCmd(), docUpsertCmd(), docListCmd(), docShowCmd(),
+		docEditCmd(), docRenameCmd(), docRmCmd(),
 		docLinkCmd(), docUnlinkCmd(),
 	)
 	return cmd
 }
 
-func docAddCmd() *cobra.Command {
+// docInputs is the resolved (filename, type, body) trio that `add` and
+// `upsert` operate on, after merging positional / --from-path / explicit flags.
+type docInputs struct {
+	Filename string
+	Type     model.DocumentType
+	Body     string
+}
+
+// resolveDocInputs derives the filename, type, and content body from the CLI
+// surface shared by `mk doc add` and `mk doc upsert`. Explicit flags always
+// win over values derived from --from-path; --from-path supplies sensible
+// defaults so skills don't have to do path-to-filename translation by hand.
+func resolveDocInputs(positional, fromPath, typeStr, content, contentFile string) (*docInputs, error) {
+	if positional != "" && fromPath != "" {
+		return nil, fmt.Errorf("provide a filename positional OR --from-path, not both")
+	}
+
 	var (
-		typeStr, content, contentFile string
+		filename string
+		err      error
 	)
+	switch {
+	case positional != "":
+		filename, err = validateDocFilename(positional)
+	case fromPath != "":
+		filename, err = validateDocFilename(canonicalDocFilename(fromPath))
+	default:
+		return nil, fmt.Errorf("provide a filename positional or --from-path")
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var t model.DocumentType
+	switch {
+	case typeStr != "":
+		t, err = model.ParseDocumentType(typeStr)
+		if err != nil {
+			return nil, err
+		}
+	case fromPath != "":
+		derived, ok := deriveDocTypeFromPath(fromPath)
+		if !ok {
+			return nil, fmt.Errorf("--type required: cannot derive document type from path %q", fromPath)
+		}
+		t = derived
+	default:
+		return nil, fmt.Errorf("--type is required")
+	}
+
+	contentFileEffective := contentFile
+	if content == "" && contentFile == "" {
+		if fromPath == "" {
+			return nil, fmt.Errorf("provide --content - (stdin) or --content-file <path>")
+		}
+		contentFileEffective = fromPath
+	}
+	body, err := readLongText(content, contentFileEffective, true, "content")
+	if err != nil {
+		return nil, err
+	}
+	if !utf8.ValidString(body) {
+		return nil, fmt.Errorf("document is not valid UTF-8 text; only text documents are supported")
+	}
+
+	return &docInputs{Filename: filename, Type: t, Body: body}, nil
+}
+
+// canonicalDocFilename converts a repo-relative path like
+// "docs/planning/not-shipped/foo.md" into "docs-planning-not-shipped-foo.md".
+func canonicalDocFilename(p string) string {
+	p = filepath.ToSlash(strings.TrimSpace(p))
+	p = strings.TrimPrefix(p, "./")
+	p = strings.TrimPrefix(p, "/")
+	return strings.ReplaceAll(p, "/", "-")
+}
+
+// deriveDocTypeFromPath maps a small set of directory conventions to a
+// document type. Returns (_, false) when no convention matches and the caller
+// must require an explicit --type.
+func deriveDocTypeFromPath(p string) (model.DocumentType, bool) {
+	p = filepath.ToSlash(strings.TrimPrefix(strings.TrimSpace(p), "./"))
+	switch {
+	case strings.HasPrefix(p, "docs/planning/not-shipped/"):
+		return model.DocTypeProjectInPlanning, true
+	case strings.HasPrefix(p, "docs/planning/in-progress/"):
+		return model.DocTypeProjectInProgress, true
+	case strings.HasPrefix(p, "docs/planning/shipped/"):
+		return model.DocTypeProjectComplete, true
+	}
+	return "", false
+}
+
+func docAddCmd() *cobra.Command {
+	var typeStr, content, contentFile, fromPath string
 	cmd := &cobra.Command{
-		Use:   "add <filename>",
+		Use:   "add [filename]",
 		Short: "Create a document in the current repo",
-		Args:  cobra.ExactArgs(1),
+		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			filename, err := validateDocFilename(args[0])
+			pos := ""
+			if len(args) == 1 {
+				pos = args[0]
+			}
+			in, err := resolveDocInputs(pos, fromPath, typeStr, content, contentFile)
 			if err != nil {
 				return err
-			}
-			t, err := model.ParseDocumentType(typeStr)
-			if err != nil {
-				return err
-			}
-			body, err := readLongText(content, contentFile, true, "content")
-			if err != nil {
-				return err
-			}
-			if !utf8.ValidString(body) {
-				return fmt.Errorf("document is not valid UTF-8 text; only text documents are supported")
 			}
 			s, err := openStore()
 			if err != nil {
@@ -76,7 +162,7 @@ func docAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			d, err := s.CreateDocument(repo.ID, filename, t, body)
+			d, err := s.CreateDocument(repo.ID, in.Filename, in.Type, in.Body)
 			if err != nil {
 				return err
 			}
@@ -87,8 +173,6 @@ func docAddCmd() *cobra.Command {
 				TargetID: &d.ID, TargetLabel: d.Filename,
 				Details: "type=" + string(d.Type),
 			})
-			// JSON consumers (AI agents, scripts) want the full document
-			// object. Text consumers want a clear success line.
 			if opts.output == outputJSON {
 				return emit(d)
 			}
@@ -99,7 +183,89 @@ func docAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&typeStr, "type", "", "document type (e.g. architecture, designs, user-docs)")
 	cmd.Flags().StringVar(&content, "content", "", "content text or '-' for stdin")
 	cmd.Flags().StringVar(&contentFile, "content-file", "", "path to a markdown file")
-	_ = cmd.MarkFlagRequired("type")
+	cmd.Flags().StringVar(&fromPath, "from-path", "", "derive filename (and optionally type+content) from a repo-relative path")
+	return cmd
+}
+
+func docUpsertCmd() *cobra.Command {
+	var typeStr, content, contentFile, fromPath string
+	cmd := &cobra.Command{
+		Use:   "upsert [filename]",
+		Short: "Create or update a document (same flag surface as `add`)",
+		Args:  cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			pos := ""
+			if len(args) == 1 {
+				pos = args[0]
+			}
+			in, err := resolveDocInputs(pos, fromPath, typeStr, content, contentFile)
+			if err != nil {
+				return err
+			}
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+			repo, err := resolveRepo(s)
+			if err != nil {
+				return err
+			}
+			existing, err := s.GetDocumentByFilename(repo.ID, in.Filename, false)
+			if errors.Is(err, store.ErrNotFound) {
+				d, err := s.CreateDocument(repo.ID, in.Filename, in.Type, in.Body)
+				if err != nil {
+					return err
+				}
+				d.Content = ""
+				recordOp(s, model.HistoryEntry{
+					RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+					Op: "document.create", Kind: "document",
+					TargetID: &d.ID, TargetLabel: d.Filename,
+					Details: "type=" + string(d.Type),
+				})
+				if opts.output == outputJSON {
+					return emit(d)
+				}
+				return ok("Created %s in %s (type=%s, %d bytes)",
+					d.Filename, repo.Prefix, d.Type, d.SizeBytes)
+			}
+			if err != nil {
+				return err
+			}
+			var newType *model.DocumentType
+			if in.Type != existing.Type {
+				t := in.Type
+				newType = &t
+			}
+			body := in.Body
+			if err := s.UpdateDocument(existing.ID, newType, &body); err != nil {
+				return err
+			}
+			updated, err := s.GetDocumentByID(existing.ID, false)
+			if err != nil {
+				return err
+			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+				Op: "document.update", Kind: "document",
+				TargetID: &updated.ID, TargetLabel: updated.Filename,
+				Details: updatedFieldList(map[string]bool{
+					"type":    newType != nil,
+					"content": true,
+				}),
+			})
+			if opts.output == outputJSON {
+				return emit(updated)
+			}
+			return ok("Updated %s in %s (type=%s, %d bytes)",
+				updated.Filename, repo.Prefix, updated.Type, updated.SizeBytes)
+		},
+	}
+	cmd.Flags().StringVar(&typeStr, "type", "", "document type (e.g. architecture, designs, user-docs)")
+	cmd.Flags().StringVar(&content, "content", "", "content text or '-' for stdin")
+	cmd.Flags().StringVar(&contentFile, "content-file", "", "path to a markdown file")
+	cmd.Flags().StringVar(&fromPath, "from-path", "", "derive filename (and optionally type+content) from a repo-relative path")
 	return cmd
 }
 
@@ -240,6 +406,72 @@ func docEditCmd() *cobra.Command {
 	cmd.Flags().StringVar(&typeStr, "type", "", "new type")
 	cmd.Flags().StringVar(&content, "content", "", "new content text or '-' for stdin")
 	cmd.Flags().StringVar(&contentFile, "content-file", "", "path to a markdown file")
+	return cmd
+}
+
+func docRenameCmd() *cobra.Command {
+	var typeStr string
+	cmd := &cobra.Command{
+		Use:   "rename <old-filename> <new-filename>",
+		Short: "Rename a document, preserving its links (and optionally update its type)",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			oldName, err := validateDocFilename(args[0])
+			if err != nil {
+				return err
+			}
+			newName, err := validateDocFilename(args[1])
+			if err != nil {
+				return err
+			}
+			if oldName == newName && typeStr == "" {
+				return fmt.Errorf("nothing to rename: old and new filenames are identical")
+			}
+			var newType *model.DocumentType
+			if typeStr != "" {
+				t, err := model.ParseDocumentType(typeStr)
+				if err != nil {
+					return err
+				}
+				newType = &t
+			}
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+			repo, err := resolveRepo(s)
+			if err != nil {
+				return err
+			}
+			d, err := s.GetDocumentByFilename(repo.ID, oldName, false)
+			if err != nil {
+				return err
+			}
+			if err := s.RenameDocument(d.ID, newName, newType); err != nil {
+				return err
+			}
+			updated, err := s.GetDocumentByID(d.ID, false)
+			if err != nil {
+				return err
+			}
+			details := fmt.Sprintf("%s → %s", oldName, newName)
+			if newType != nil {
+				details += " type=" + string(*newType)
+			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+				Op: "document.rename", Kind: "document",
+				TargetID: &updated.ID, TargetLabel: updated.Filename,
+				Details: details,
+			})
+			if opts.output == outputJSON {
+				return emit(updated)
+			}
+			return ok("Renamed %s → %s in %s", oldName, newName, repo.Prefix)
+		},
+	}
+	cmd.Flags().StringVar(&typeStr, "type", "", "optionally also update the document type")
 	return cmd
 }
 

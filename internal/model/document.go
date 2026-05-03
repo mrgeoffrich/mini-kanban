@@ -69,15 +69,16 @@ type Document struct {
 // The "Target" field renders the linked end as a human-readable label
 // (e.g. "MINI-42" or "feature/auth-rewrite") for text and JSON output.
 type DocumentLink struct {
-	ID               int64     `json:"id"`
-	DocumentID       int64     `json:"document_id"`
-	DocumentFilename string    `json:"document_filename,omitempty"`
-	IssueID          *int64    `json:"issue_id,omitempty"`
-	IssueKey         string    `json:"issue_key,omitempty"`
-	FeatureID        *int64    `json:"feature_id,omitempty"`
-	FeatureSlug      string    `json:"feature_slug,omitempty"`
-	Description      string    `json:"description,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
+	ID               int64        `json:"id"`
+	DocumentID       int64        `json:"document_id"`
+	DocumentFilename string       `json:"document_filename,omitempty"`
+	DocumentType     DocumentType `json:"document_type,omitempty"`
+	IssueID          *int64       `json:"issue_id,omitempty"`
+	IssueKey         string       `json:"issue_key,omitempty"`
+	FeatureID        *int64       `json:"feature_id,omitempty"`
+	FeatureSlug      string       `json:"feature_slug,omitempty"`
+	Description      string       `json:"description,omitempty"`
+	CreatedAt        time.Time    `json:"created_at"`
 }
 
 // Target returns a compact label for the linked end ("MINI-42" or
