@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -10,6 +11,20 @@ import (
 	"mini-kanban/internal/model"
 	"mini-kanban/internal/store"
 )
+
+// boardRefreshInterval is how often the board reloads issues from the
+// store while the TUI is open. Short enough to feel live, long enough
+// not to thrash SQLite.
+const boardRefreshInterval = 30 * time.Second
+
+// boardRefreshMsg is delivered by tea.Tick to trigger a reload.
+type boardRefreshMsg time.Time
+
+func boardRefreshTick() tea.Cmd {
+	return tea.Tick(boardRefreshInterval, func(t time.Time) tea.Msg {
+		return boardRefreshMsg(t)
+	})
+}
 
 // boardView is the kanban tab: one column per state, optional bottom detail
 // pane, and a fullscreen card overlay opened with `enter`.
@@ -33,6 +48,8 @@ type boardView struct {
 	picker    bool
 	pickerRow int
 
+	lastRefresh time.Time
+
 	err error
 }
 
@@ -53,6 +70,7 @@ func newBoardView(s *store.Store, repo *model.Repo) (*boardView, error) {
 	if err := b.reload(); err != nil {
 		return nil, err
 	}
+	b.lastRefresh = time.Now()
 	b.clampCol()
 	b.refreshSelection()
 	return b, nil
@@ -149,6 +167,15 @@ func (b *boardView) refreshSelection() {
 	b.overlayScroll = 0
 }
 
+func (b *boardView) Init() tea.Cmd { return boardRefreshTick() }
+
+func (b *boardView) Status() string {
+	if b.lastRefresh.IsZero() {
+		return ""
+	}
+	return "↻ " + b.lastRefresh.Format("15:04:05")
+}
+
 func (b *boardView) HasOverlay() bool { return b.overlay || b.picker }
 
 func (b *boardView) Help() string {
@@ -162,6 +189,20 @@ func (b *boardView) Help() string {
 }
 
 func (b *boardView) Update(msg tea.Msg) tea.Cmd {
+	if t, ok := msg.(boardRefreshMsg); ok {
+		// Periodic background reload. We pull fresh issues, refresh the
+		// selected card's comments, and schedule the next tick. Errors
+		// surface in the footer rather than crashing the loop.
+		if err := b.reload(); err != nil {
+			b.err = err
+		} else {
+			b.err = nil
+		}
+		b.lastRefresh = time.Time(t)
+		b.clampCol()
+		b.refreshSelection()
+		return boardRefreshTick()
+	}
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return nil
@@ -236,7 +277,10 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 	case "r":
 		if err := b.reload(); err != nil {
 			b.err = err
+		} else {
+			b.err = nil
 		}
+		b.lastRefresh = time.Now()
 	case "d":
 		b.detailVisible = !b.detailVisible
 	case "enter":
@@ -470,7 +514,8 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 		lines = append(lines, mutedStyle.Width(innerWidth).Padding(1, 1).Render("— empty —"))
 	}
 	for i, iss := range issues {
-		prefixW := len(iss.Key) + 2 // KEY + two-space gutter on line 0 only
+		bracketed := "[" + iss.Key + "]"
+		prefixW := len(bracketed) + 2 // [KEY] + two-space gutter on line 0 only
 		// Line 0 shares its row with the issue key, so it has less title room
 		// than wrap-around lines, which start at the left edge.
 		firstW := innerWidth - 2 - prefixW
@@ -492,10 +537,10 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 		// punches a black hole in the parent's background even when we set
 		// an explicit bg on the inner span. Letting selStyle paint uniformly
 		// gives a clean fill at the cost of the key's accent colour.
-		keyRender := keyStyle.Render(iss.Key)
+		keyRender := keyStyle.Render(bracketed)
 		if isSel {
 			styler = selStyle
-			keyRender = iss.Key
+			keyRender = bracketed
 		}
 		for j := 0; j < cardHeight; j++ {
 			var content string
@@ -548,12 +593,13 @@ func (b *boardView) renderDetail(width, height int) string {
 	}
 
 	iss := b.selected
-	titleLine := keyStyle.Bold(true).Render(iss.Key) + "  " +
-		boldStyle.Render(truncate(iss.Title, innerWidth-len(iss.Key)-2))
+	bracketedKey := "[" + iss.Key + "]"
+	titleLine := keyStyle.Bold(true).Render(bracketedKey) + "  " +
+		boldStyle.Render(truncate(iss.Title, innerWidth-len(bracketedKey)-2))
 
 	metaParts := []string{"state: " + stateLabel(iss.State)}
 	if iss.FeatureSlug != "" {
-		metaParts = append(metaParts, "feature: "+iss.FeatureSlug)
+		metaParts = append(metaParts, "feature: ["+iss.FeatureSlug+"]")
 	}
 	if len(iss.Tags) > 0 {
 		metaParts = append(metaParts, "tags: "+strings.Join(iss.Tags, ", "))
@@ -614,7 +660,7 @@ func (b *boardView) viewOverlay(width, height int) string {
 			Render("No issue selected.")
 	}
 
-	titleLine := keyStyle.Bold(true).Render(iss.Key) + "  " +
+	titleLine := keyStyle.Bold(true).Render("["+iss.Key+"]") + "  " +
 		boldStyle.Render(iss.Title)
 
 	labelStyle := lipgloss.NewStyle().Foreground(mutedColor).Width(10)
@@ -625,7 +671,7 @@ func (b *boardView) viewOverlay(width, height int) string {
 	var metaLines []string
 	metaLines = append(metaLines, metaRow("state", stateLabel(iss.State)))
 	if iss.FeatureSlug != "" {
-		metaLines = append(metaLines, metaRow("feature", iss.FeatureSlug))
+		metaLines = append(metaLines, metaRow("feature", "["+iss.FeatureSlug+"]"))
 	}
 	if len(iss.Tags) > 0 {
 		metaLines = append(metaLines, metaRow("tags", strings.Join(iss.Tags, ", ")))

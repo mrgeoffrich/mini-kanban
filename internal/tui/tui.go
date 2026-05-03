@@ -21,11 +21,18 @@ import (
 
 // view is the contract every tab implements. Shell mutates state by handing
 // messages to Update; rendering is a pure function of (width, height).
+//
+// Init returns an optional one-shot Cmd run at program startup — used by
+// the board to kick off its 30-second refresh tick. Status returns an
+// optional right-aligned chip rendered in the footer (e.g. "↻ 14:23:05"
+// for the board's last refresh time); empty strings are skipped.
 type view interface {
+	Init() tea.Cmd
 	Update(msg tea.Msg) tea.Cmd
 	View(width, height int) string
 	Help() string
 	HasOverlay() bool
+	Status() string
 }
 
 type tab struct {
@@ -62,7 +69,18 @@ type Model struct {
 	height int
 }
 
-func (m *Model) Init() tea.Cmd { return nil }
+func (m *Model) Init() tea.Cmd {
+	var cmds []tea.Cmd
+	for _, t := range m.tabs {
+		if c := t.v.Init(); c != nil {
+			cmds = append(cmds, c)
+		}
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
+}
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -101,8 +119,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		return m, m.tabs[m.active].v.Update(msg)
 	}
-	return m, m.tabs[m.active].v.Update(msg)
+	// Non-key, non-windowsize messages (ticks, custom messages from
+	// commands) get broadcast to every view so a tab can receive replies
+	// to its own commands even while another tab is active.
+	var cmds []tea.Cmd
+	for _, t := range m.tabs {
+		if c := t.v.Update(msg); c != nil {
+			cmds = append(cmds, c)
+		}
+	}
+	if len(cmds) == 0 {
+		return m, nil
+	}
+	return m, tea.Batch(cmds...)
 }
 
 func (m *Model) View() string {
@@ -110,13 +141,30 @@ func (m *Model) View() string {
 		return ""
 	}
 	header := m.renderHeader()
-	help := footerStyle.Render(" " + m.tabs[m.active].v.Help() + " ")
-	bodyHeight := m.height - lipgloss.Height(header) - lipgloss.Height(help)
+	footer := m.renderFooter()
+	bodyHeight := m.height - lipgloss.Height(header) - lipgloss.Height(footer)
 	if bodyHeight < 5 {
 		bodyHeight = 5
 	}
 	body := m.tabs[m.active].v.View(m.width, bodyHeight)
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, help)
+	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+}
+
+// renderFooter lays out left-aligned help and a right-aligned status chip
+// (e.g. the board's auto-refresh timestamp). Both come from the active view.
+func (m *Model) renderFooter() string {
+	helpText := footerStyle.Render(" " + m.tabs[m.active].v.Help() + " ")
+	status := m.tabs[m.active].v.Status()
+	if status == "" {
+		return helpText
+	}
+	statusText := footerStyle.Render(status + " ")
+	gap := m.width - lipgloss.Width(helpText) - lipgloss.Width(statusText)
+	if gap < 1 {
+		gap = 1
+	}
+	spacer := lipgloss.NewStyle().Width(gap).Render("")
+	return lipgloss.JoinHorizontal(lipgloss.Top, helpText, spacer, statusText)
 }
 
 func (m *Model) renderHeader() string {

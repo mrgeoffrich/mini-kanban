@@ -88,6 +88,8 @@ func (f *featuresView) refreshSelection() {
 	f.overlayScroll = 0
 }
 
+func (f *featuresView) Init() tea.Cmd  { return nil }
+func (f *featuresView) Status() string { return "" }
 func (f *featuresView) HasOverlay() bool { return f.overlay }
 
 func (f *featuresView) Help() string {
@@ -212,10 +214,11 @@ func (f *featuresView) renderList(width, height int) string {
 		styler := rowStyle
 		// When selected we render the slug as plain text so lipgloss paints
 		// the row uniformly — same nested-style fix as the board cards.
-		slugRender := keyStyle.Render(feat.Slug)
+		bracketed := "[" + feat.Slug + "]"
+		slugRender := keyStyle.Render(bracketed)
 		if isSel {
 			styler = selStyle
-			slugRender = feat.Slug
+			slugRender = bracketed
 		}
 		titleLines := wrapLines(feat.Title, titleW, 2)
 		for j := 0; j < featureRows; j++ {
@@ -263,7 +266,7 @@ func (f *featuresView) renderDetail(width, height int) string {
 
 	feat := f.selected
 	title := boldStyle.Render(truncate(feat.Title, innerWidth))
-	meta := mutedStyle.Render(truncate(fmt.Sprintf("%s · created %s · updated %s",
+	meta := mutedStyle.Render(truncate(fmt.Sprintf("[%s] · created %s · updated %s",
 		feat.Slug,
 		feat.CreatedAt.Format("2006-01-02"),
 		feat.UpdatedAt.Format("2006-01-02")),
@@ -278,11 +281,11 @@ func (f *featuresView) renderDetail(width, height int) string {
 		descRows = 8
 	}
 
-	desc := feat.Description
-	if desc == "" {
+	var desc string
+	if feat.Description == "" {
 		desc = mutedStyle.Italic(true).Render("(no description)")
 	} else {
-		desc = lipgloss.NewStyle().Width(innerWidth).Render(desc)
+		desc = renderMarkdown(feat.Description, innerWidth)
 		desc = clipLines(desc, descRows)
 	}
 
@@ -302,9 +305,10 @@ func (f *featuresView) renderDetail(width, height int) string {
 		issueLines = append(issueLines, mutedStyle.Italic(true).Render("(no issues yet)"))
 	default:
 		for _, iss := range f.issues {
-			line := keyStyle.Render(iss.Key) + "  " +
+			bracketed := "[" + iss.Key + "]"
+			line := keyStyle.Render(bracketed) + "  " +
 				mutedStyle.Render(fmt.Sprintf("%-12s", stateLabel(iss.State))) + "  " +
-				truncate(iss.Title, innerWidth-len(iss.Key)-16)
+				truncate(iss.Title, innerWidth-len(bracketed)-16)
 			issueLines = append(issueLines, line)
 		}
 	}
@@ -340,7 +344,7 @@ func (f *featuresView) viewOverlay(width, height int) string {
 
 	feat := f.selected
 	title := boldStyle.Render(feat.Title)
-	meta := mutedStyle.Render(fmt.Sprintf("%s · created %s · updated %s",
+	meta := mutedStyle.Render(fmt.Sprintf("[%s] · created %s · updated %s",
 		feat.Slug,
 		feat.CreatedAt.Format("2006-01-02 15:04"),
 		feat.UpdatedAt.Format("2006-01-02 15:04"),
@@ -363,7 +367,7 @@ func (f *featuresView) viewOverlay(width, height int) string {
 		issueBlocks = append(issueBlocks, mutedStyle.Italic(true).Render("(none)"))
 	default:
 		for _, iss := range f.issues {
-			line := keyStyle.Render(iss.Key) + "  " +
+			line := keyStyle.Render("["+iss.Key+"]") + "  " +
 				mutedStyle.Render(stateLabel(iss.State)) + "  " + iss.Title
 			issueBlocks = append(issueBlocks, line)
 		}

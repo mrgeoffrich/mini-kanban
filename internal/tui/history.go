@@ -46,6 +46,8 @@ func (h *historyView) reload() {
 	}
 }
 
+func (h *historyView) Init() tea.Cmd    { return nil }
+func (h *historyView) Status() string   { return "" }
 func (h *historyView) HasOverlay() bool { return false }
 
 func (h *historyView) Help() string {
@@ -156,8 +158,14 @@ func (h *historyView) View(width, height int) string {
 		if l := lipgloss.Width(e.Op); l > opW {
 			opW = l
 		}
-		if l := lipgloss.Width(e.TargetLabel); l > targetW {
-			targetW = l
+		// Target labels render bracketed, so reserve 2 extra columns when
+		// the label is non-empty.
+		tw := lipgloss.Width(e.TargetLabel)
+		if tw > 0 {
+			tw += 2
+		}
+		if tw > targetW {
+			targetW = tw
 		}
 	}
 	if actorW > actorCap {
@@ -209,10 +217,14 @@ func (h *historyView) View(width, height int) string {
 	var rows []string
 	for i := h.scroll; i < end; i++ {
 		e := h.entries[i]
+		target := e.TargetLabel
+		if target != "" {
+			target = "[" + target + "]"
+		}
 		line := cell(formatRelative(e.CreatedAt), whenW) + sep +
 			cell(e.Actor, actorW) + sep +
 			cell(e.Op, opW) + sep +
-			cell(e.TargetLabel, targetW) + sep +
+			cell(target, targetW) + sep +
 			cell(oneLine(e.Details), detailsW)
 
 		styled := lipgloss.NewStyle().Width(innerWidth)

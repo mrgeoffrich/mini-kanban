@@ -93,6 +93,8 @@ func (d *docsView) refreshSelection() {
 	d.overlayScroll = 0
 }
 
+func (d *docsView) Init() tea.Cmd  { return nil }
+func (d *docsView) Status() string { return "" }
 func (d *docsView) HasOverlay() bool { return d.overlay }
 
 func (d *docsView) Help() string {
@@ -268,7 +270,11 @@ func (d *docsView) renderPreview(width, height int) string {
 	if contentRows < 1 {
 		contentRows = 1
 	}
-	body := lipgloss.NewStyle().Width(innerWidth).Render(doc.Content)
+	// Render the preview through glamour at preview-pane width so styling
+	// matches the fullscreen overlay. Clip to the rows we have available;
+	// it can occasionally cut a styled block mid-element but it's better
+	// than a wall of plain text.
+	body := renderMarkdown(doc.Content, innerWidth)
 	body = clipLines(body, contentRows)
 
 	hint := mutedStyle.Italic(true).Render("(enter for full view)")
