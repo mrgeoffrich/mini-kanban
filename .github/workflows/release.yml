@@ -1,0 +1,60 @@
+name: Release
+
+# Triggered by pushing a semver tag like v0.1.0. The skill at
+# .claude/skills/release-mk handles the local pre-flight + tagging;
+# this workflow does the build and publish on a clean Ubuntu runner.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for changelog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./...
+
+      - name: Cross-compile and package
+        run: bash scripts/release.sh "${GITHUB_REF_NAME}"
+
+      - name: Compose release notes
+        run: |
+          set -euo pipefail
+          previous="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          {
+            if [ -n "$previous" ]; then
+              echo "## Changes since ${previous}"
+              echo
+              git log --pretty=format:'- %s' "${previous}..${GITHUB_REF_NAME}"
+            else
+              echo "## Initial release"
+              echo
+              git log --pretty=format:'- %s' "${GITHUB_REF_NAME}"
+            fi
+          } > /tmp/notes.md
+          cat /tmp/notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file /tmp/notes.md \
+            dist/mk-*.tar.gz \
+            dist/mk-*.zip \
+            dist/checksums.txt
