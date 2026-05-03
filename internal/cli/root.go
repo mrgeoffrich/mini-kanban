@@ -22,7 +22,7 @@ var opts = globalOpts{output: outputText}
 func NewRoot() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "mk",
-		Short:         "mini-kanban: a Linear-style issue tracker, CLI-first",
+		Short:         "mini-kanban: a local-first issue tracker, CLI-first",
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

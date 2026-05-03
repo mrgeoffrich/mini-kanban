@@ -2,7 +2,7 @@
 
 A local-first, single-binary issue tracker designed to be driven equally well by humans and AI agents.
 
-`mk` is a CLI and TUI on top of a single SQLite file at `~/.mini-kanban/db.sqlite`. It auto-detects which repo you're in, gives every issue a Linear-style `PREFIX-N` key, and exposes every read in JSON so scripts and skills can drive it without parsing text. Long-text fields (descriptions, comments, doc bodies) are supplied via files or stdin, never inline flags — friendly to multi-line input from agents.
+`mk` is a CLI and TUI on top of a single SQLite file at `~/.mini-kanban/db.sqlite`. It auto-detects which repo you're in, gives every issue a `PREFIX-N` key (e.g. `MINI-42`), and exposes every read in JSON so scripts and skills can drive it without parsing text. Long-text fields (descriptions, comments, doc bodies) are supplied via files or stdin, never inline flags — friendly to multi-line input from agents.
 
 ## Features
 
