@@ -79,17 +79,22 @@ CREATE TABLE IF NOT EXISTS issue_tags (
 CREATE INDEX IF NOT EXISTS idx_issue_tags_tag ON issue_tags(tag);
 
 CREATE TABLE IF NOT EXISTS documents (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    repo_id    INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
-    filename   TEXT    NOT NULL,
-    type       TEXT    NOT NULL CHECK (type IN
-                 ('user_docs','project_in_planning','project_in_progress',
-                  'project_complete','vendor_docs','architecture','designs',
-                  'testing_plans')),
-    content    TEXT    NOT NULL,
-    size_bytes INTEGER NOT NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo_id     INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    filename    TEXT    NOT NULL,
+    type        TEXT    NOT NULL CHECK (type IN
+                  ('user_docs','project_in_planning','project_in_progress',
+                   'project_complete','vendor_docs','architecture','designs',
+                   'testing_plans')),
+    content     TEXT    NOT NULL,
+    size_bytes  INTEGER NOT NULL,
+    -- source_path is the repo-relative on-disk path the document was last
+    -- imported from via `mk doc add/upsert --from-path`. Empty if the doc
+    -- was created with an explicit filename. Used by `mk doc export --to-path`
+    -- to materialise the doc back to its canonical location.
+    source_path TEXT    NOT NULL DEFAULT '',
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(repo_id, filename)
 );
 

@@ -11,10 +11,10 @@ import (
 
 var ErrDocumentExists = errors.New("a document with that filename already exists in this repo")
 
-func (s *Store) CreateDocument(repoID int64, filename string, t model.DocumentType, content string) (*model.Document, error) {
+func (s *Store) CreateDocument(repoID int64, filename string, t model.DocumentType, content, sourcePath string) (*model.Document, error) {
 	res, err := s.DB.Exec(
-		`INSERT INTO documents (repo_id, filename, type, content, size_bytes) VALUES (?, ?, ?, ?, ?)`,
-		repoID, filename, string(t), content, len(content),
+		`INSERT INTO documents (repo_id, filename, type, content, size_bytes, source_path) VALUES (?, ?, ?, ?, ?, ?)`,
+		repoID, filename, string(t), content, len(content), sourcePath,
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
@@ -68,9 +68,10 @@ func (s *Store) ListDocuments(f DocumentFilter) ([]*model.Document, error) {
 	return out, rows.Err()
 }
 
-// UpdateDocument patches the type and/or content. Pass nil for fields you
-// don't want to change. Bumps updated_at when something actually changed.
-func (s *Store) UpdateDocument(id int64, newType *model.DocumentType, newContent *string) error {
+// UpdateDocument patches the type, content, and/or source_path. Pass nil for
+// fields you don't want to change. Bumps updated_at when something actually
+// changed.
+func (s *Store) UpdateDocument(id int64, newType *model.DocumentType, newContent, newSourcePath *string) error {
 	sets := []string{}
 	args := []any{}
 	if newType != nil {
@@ -80,6 +81,10 @@ func (s *Store) UpdateDocument(id int64, newType *model.DocumentType, newContent
 	if newContent != nil {
 		sets = append(sets, "content = ?", "size_bytes = ?")
 		args = append(args, *newContent, len(*newContent))
+	}
+	if newSourcePath != nil {
+		sets = append(sets, "source_path = ?")
+		args = append(args, *newSourcePath)
 	}
 	if len(sets) == 0 {
 		return nil
@@ -121,7 +126,7 @@ func (s *Store) DeleteDocument(id int64) error {
 }
 
 func docCols(withContent bool) string {
-	c := "id, repo_id, filename, type, size_bytes, created_at, updated_at"
+	c := "id, repo_id, filename, type, size_bytes, source_path, created_at, updated_at"
 	if withContent {
 		c += ", content"
 	}
@@ -135,9 +140,9 @@ func scanDocument(row rowScanner, withContent bool) (*model.Document, error) {
 		err error
 	)
 	if withContent {
-		err = row.Scan(&d.ID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.CreatedAt, &d.UpdatedAt, &d.Content)
+		err = row.Scan(&d.ID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.SourcePath, &d.CreatedAt, &d.UpdatedAt, &d.Content)
 	} else {
-		err = row.Scan(&d.ID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.CreatedAt, &d.UpdatedAt)
+		err = row.Scan(&d.ID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.SourcePath, &d.CreatedAt, &d.UpdatedAt)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound

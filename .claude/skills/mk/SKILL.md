@@ -227,6 +227,12 @@ mk doc rename <old> <new>            Rename in place. Links are preserved
   --type <new-type>                      Optionally also change the type
                                           (handy when a plan moves
                                            not-shipped/ → shipped/)
+mk doc export <filename>             Materialise a document onto disk
+  --to-path                              Write to the path the doc was last
+                                          imported from (--from-path on
+                                          add/upsert; errors if none)
+  --to <path>                            Write to an explicit repo-relative
+                                          path
 mk doc rm <filename>                 Delete a document (and its links)
 
 mk doc link   <filename> <ISSUE-KEY|feature-slug> [--why <text>]
@@ -264,6 +270,11 @@ mk doc rename \
   docs-planning-not-shipped-auth-plan.md \
   docs-planning-shipped-auth-plan.md \
   --type project_complete
+
+# Materialise the canonical version back onto disk (the inverse of
+# --from-path; mkdir -p as needed; overwrites if the file exists).
+mk doc export docs-designs-foo.svg --to-path
+mk doc export auth-spec.md --to docs/auth-spec.md  # or to an explicit path
 
 # Manual filename / type still works.
 mk doc add auth-spec.md --type architecture --content-file docs/auth.md

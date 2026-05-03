@@ -55,14 +55,15 @@ func docTypeStrings() []string {
 }
 
 type Document struct {
-	ID        int64        `json:"id"`
-	RepoID    int64        `json:"repo_id"`
-	Filename  string       `json:"filename"`
-	Type      DocumentType `json:"type"`
-	SizeBytes int64        `json:"size_bytes"`
-	Content   string       `json:"content,omitempty"` // populated only on show
-	CreatedAt time.Time    `json:"created_at"`
-	UpdatedAt time.Time    `json:"updated_at"`
+	ID         int64        `json:"id"`
+	RepoID     int64        `json:"repo_id"`
+	Filename   string       `json:"filename"`
+	Type       DocumentType `json:"type"`
+	SizeBytes  int64        `json:"size_bytes"`
+	Content    string       `json:"content,omitempty"` // populated only on show
+	SourcePath string       `json:"source_path,omitempty"`
+	CreatedAt  time.Time    `json:"created_at"`
+	UpdatedAt  time.Time    `json:"updated_at"`
 }
 
 // DocumentLink describes one (document, issue|feature, description) edge.

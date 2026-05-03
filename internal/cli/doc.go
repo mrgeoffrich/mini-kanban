@@ -39,18 +39,21 @@ func newDocCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "doc", Short: "Manage per-repo text documents and their links to issues/features"}
 	cmd.AddCommand(
 		docAddCmd(), docUpsertCmd(), docListCmd(), docShowCmd(),
-		docEditCmd(), docRenameCmd(), docRmCmd(),
+		docEditCmd(), docRenameCmd(), docExportCmd(), docRmCmd(),
 		docLinkCmd(), docUnlinkCmd(),
 	)
 	return cmd
 }
 
-// docInputs is the resolved (filename, type, body) trio that `add` and
-// `upsert` operate on, after merging positional / --from-path / explicit flags.
+// docInputs is the resolved (filename, type, body, source_path) tuple that
+// `add` and `upsert` operate on, after merging positional / --from-path /
+// explicit flags. SourcePath is the value that should be stored on the row;
+// it's set when --from-path was used and empty otherwise.
 type docInputs struct {
-	Filename string
-	Type     model.DocumentType
-	Body     string
+	Filename   string
+	Type       model.DocumentType
+	Body       string
+	SourcePath string
 }
 
 // resolveDocInputs derives the filename, type, and content body from the CLI
@@ -110,7 +113,40 @@ func resolveDocInputs(positional, fromPath, typeStr, content, contentFile string
 		return nil, fmt.Errorf("document is not valid UTF-8 text; only text documents are supported")
 	}
 
-	return &docInputs{Filename: filename, Type: t, Body: body}, nil
+	sourcePath := ""
+	if fromPath != "" {
+		sourcePath = canonicalSourcePath(fromPath)
+		if err := validateRelativePath(sourcePath); err != nil {
+			return nil, fmt.Errorf("--from-path: %w", err)
+		}
+	}
+	return &docInputs{Filename: filename, Type: t, Body: body, SourcePath: sourcePath}, nil
+}
+
+// canonicalSourcePath normalises a --from-path value to its repo-relative
+// form: trims whitespace, leading "./" / "/", and forward-slash separators.
+func canonicalSourcePath(p string) string {
+	p = filepath.ToSlash(strings.TrimSpace(p))
+	p = strings.TrimPrefix(p, "./")
+	p = strings.TrimPrefix(p, "/")
+	return p
+}
+
+// validateRelativePath rejects paths that escape the repo root or are
+// absolute. Used both for --from-path on import and for the resolved
+// destination on `mk doc export`.
+func validateRelativePath(p string) error {
+	if p == "" {
+		return fmt.Errorf("path is empty")
+	}
+	if filepath.IsAbs(p) || strings.HasPrefix(p, "/") {
+		return fmt.Errorf("path %q must be relative", p)
+	}
+	clean := filepath.ToSlash(filepath.Clean(p))
+	if clean == ".." || strings.HasPrefix(clean, "../") {
+		return fmt.Errorf("path %q escapes the repo root", p)
+	}
+	return nil
 }
 
 // canonicalDocFilename converts a repo-relative path like
@@ -162,7 +198,7 @@ func docAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			d, err := s.CreateDocument(repo.ID, in.Filename, in.Type, in.Body)
+			d, err := s.CreateDocument(repo.ID, in.Filename, in.Type, in.Body, in.SourcePath)
 			if err != nil {
 				return err
 			}
@@ -213,7 +249,7 @@ func docUpsertCmd() *cobra.Command {
 			}
 			existing, err := s.GetDocumentByFilename(repo.ID, in.Filename, false)
 			if errors.Is(err, store.ErrNotFound) {
-				d, err := s.CreateDocument(repo.ID, in.Filename, in.Type, in.Body)
+				d, err := s.CreateDocument(repo.ID, in.Filename, in.Type, in.Body, in.SourcePath)
 				if err != nil {
 					return err
 				}
@@ -239,7 +275,15 @@ func docUpsertCmd() *cobra.Command {
 				newType = &t
 			}
 			body := in.Body
-			if err := s.UpdateDocument(existing.ID, newType, &body); err != nil {
+			// Refresh source_path on every --from-path upsert so it tracks the
+			// most recent import location. Skip when no --from-path was given,
+			// to avoid clobbering an existing recorded path.
+			var newSource *string
+			if in.SourcePath != "" && in.SourcePath != existing.SourcePath {
+				sp := in.SourcePath
+				newSource = &sp
+			}
+			if err := s.UpdateDocument(existing.ID, newType, &body, newSource); err != nil {
 				return err
 			}
 			updated, err := s.GetDocumentByID(existing.ID, false)
@@ -251,8 +295,9 @@ func docUpsertCmd() *cobra.Command {
 				Op: "document.update", Kind: "document",
 				TargetID: &updated.ID, TargetLabel: updated.Filename,
 				Details: updatedFieldList(map[string]bool{
-					"type":    newType != nil,
-					"content": true,
+					"type":        newType != nil,
+					"content":     true,
+					"source_path": newSource != nil,
 				}),
 			})
 			if opts.output == outputJSON {
@@ -384,7 +429,7 @@ func docEditCmd() *cobra.Command {
 			if newType == nil && newContent == nil {
 				return fmt.Errorf("nothing to update; pass --type and/or --content/--content-file")
 			}
-			if err := s.UpdateDocument(d.ID, newType, newContent); err != nil {
+			if err := s.UpdateDocument(d.ID, newType, newContent, nil); err != nil {
 				return err
 			}
 			updated, err := s.GetDocumentByID(d.ID, false)
@@ -472,6 +517,72 @@ func docRenameCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&typeStr, "type", "", "optionally also update the document type")
+	return cmd
+}
+
+func docExportCmd() *cobra.Command {
+	var (
+		toPath     bool
+		explicitTo string
+	)
+	cmd := &cobra.Command{
+		Use:   "export <filename>",
+		Short: "Write a document's content to disk",
+		Long: `Write a document's content to disk.
+
+Pass --to-path to use the source path the doc was imported from
+(via --from-path on add/upsert), or --to <path> to write to an
+explicit path. Parent directories are created as needed and an
+existing file at the destination is overwritten.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if toPath && explicitTo != "" {
+				return fmt.Errorf("--to-path and --to are mutually exclusive")
+			}
+			if !toPath && explicitTo == "" {
+				return fmt.Errorf("provide --to-path (use stored source_path) or --to <path>")
+			}
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+			repo, err := resolveRepo(s)
+			if err != nil {
+				return err
+			}
+			d, err := s.GetDocumentByFilename(repo.ID, args[0], true)
+			if err != nil {
+				return err
+			}
+			var dest string
+			if toPath {
+				if d.SourcePath == "" {
+					return fmt.Errorf("document %s has no source_path; pass --to <path> or re-import via `mk doc upsert --from-path`", d.Filename)
+				}
+				dest = d.SourcePath
+			} else {
+				dest = explicitTo
+			}
+			if err := validateRelativePath(dest); err != nil {
+				return err
+			}
+			repoRoot := repo.Path
+			if repoRoot == "" {
+				return fmt.Errorf("repo path is unset; cannot resolve export destination")
+			}
+			absDest := filepath.Join(repoRoot, filepath.FromSlash(dest))
+			if err := os.MkdirAll(filepath.Dir(absDest), 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(absDest, []byte(d.Content), 0o644); err != nil {
+				return err
+			}
+			return ok("wrote %s (%d bytes) to %s", d.Filename, len(d.Content), absDest)
+		},
+	}
+	cmd.Flags().BoolVar(&toPath, "to-path", false, "write to the doc's stored source_path (the path used with --from-path)")
+	cmd.Flags().StringVar(&explicitTo, "to", "", "write to this repo-relative path")
 	return cmd
 }
 

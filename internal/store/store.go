@@ -88,6 +88,15 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`DROP TABLE IF EXISTS attachments`); err != nil {
 		return err
 	}
+	hasSrc, err := columnExists(db, "documents", "source_path")
+	if err != nil {
+		return err
+	}
+	if !hasSrc {
+		if _, err := db.Exec(`ALTER TABLE documents ADD COLUMN source_path TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
