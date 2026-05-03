@@ -29,7 +29,21 @@ type featuresView struct {
 	overlay       bool
 	overlayScroll int
 
+	mdCache map[int]mdCacheEntry // see docsView for shape
+
 	err error
+}
+
+func (f *featuresView) cachedMD(id int64, src string, width int) string {
+	if f.mdCache == nil {
+		f.mdCache = map[int]mdCacheEntry{}
+	}
+	if e, ok := f.mdCache[width]; ok && e.id == id {
+		return e.out
+	}
+	out := renderMarkdown(src, width)
+	f.mdCache[width] = mdCacheEntry{id: id, out: out}
+	return out
 }
 
 func newFeaturesView(s *store.Store, repo *model.Repo) *featuresView {
@@ -46,6 +60,7 @@ func (f *featuresView) reload() {
 		return
 	}
 	f.err = nil
+	f.mdCache = nil
 	f.features = list
 	if f.row >= len(list) {
 		f.row = max(0, len(list)-1)
@@ -285,7 +300,7 @@ func (f *featuresView) renderDetail(width, height int) string {
 	if feat.Description == "" {
 		desc = mutedStyle.Italic(true).Render("(no description)")
 	} else {
-		desc = renderMarkdown(feat.Description, innerWidth)
+		desc = f.cachedMD(feat.ID, feat.Description, innerWidth)
 		desc = clipLines(desc, descRows)
 	}
 
@@ -361,7 +376,7 @@ func (f *featuresView) viewOverlay(width, height int) string {
 	if feat.Description == "" {
 		desc = mutedStyle.Italic(true).Render("(none)")
 	} else {
-		desc = renderMarkdown(feat.Description, contentWidth)
+		desc = f.cachedMD(feat.ID, feat.Description, contentWidth)
 	}
 
 	issuesHeader := boldStyle.Render(fmt.Sprintf("Issues · %d", len(f.issues)))

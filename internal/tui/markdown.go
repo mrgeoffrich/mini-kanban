@@ -37,6 +37,13 @@ func mdRenderer(width int) *glamour.TermRenderer {
 	return r
 }
 
+// mdCacheEntry pairs a rendered markdown string with the entity ID it was
+// rendered for. Views key it by terminal width and discard mismatches.
+type mdCacheEntry struct {
+	id  int64
+	out string
+}
+
 // renderMarkdown returns a styled rendering of `md` sized to `width`. On
 // error or empty input it returns a sensible fallback rather than panicking
 // — markdown formatting in this TUI is purely decorative.

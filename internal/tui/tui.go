@@ -40,6 +40,13 @@ type tab struct {
 	v    view
 }
 
+// openDocMsg is emitted by the board's attachments pane when the user
+// presses enter on a linked document. The shell intercepts it and hands
+// the filename to the Documents tab, switching focus.
+type openDocMsg struct {
+	filename string
+}
+
 // Run boots the Bubble Tea program in alt-screen mode and blocks until
 // quit. The store is owned by the caller.
 func Run(s *store.Store, repo *model.Repo) error {
@@ -87,6 +94,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		return m, nil
+	case openDocMsg:
+		// Cross-tab: hand the filename to the Documents tab and focus it.
+		for i, t := range m.tabs {
+			if t.name != "Documents" {
+				continue
+			}
+			if dv, ok := t.v.(*docsView); ok {
+				dv.selectByFilename(msg.filename)
+			}
+			m.active = i
+			return m, nil
+		}
 		return m, nil
 	case tea.KeyMsg:
 		// ctrl+c always quits, even past an overlay.

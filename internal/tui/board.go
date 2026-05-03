@@ -17,6 +17,17 @@ import (
 // not to thrash SQLite.
 const boardRefreshInterval = 30 * time.Second
 
+// overlayPane identifies which sub-pane of the fullscreen card overlay
+// currently has the focus, so j/k and enter route to the right place
+// and the matching header gets the accent treatment.
+type overlayPane int
+
+const (
+	paneDescription overlayPane = iota
+	paneComments
+	paneAttachments
+)
+
 // boardRefreshMsg is delivered by tea.Tick to trigger a reload.
 type boardRefreshMsg time.Time
 
@@ -47,14 +58,31 @@ type boardView struct {
 	attachErr    error
 
 	overlay       bool
-	overlayScroll int
+	overlayFocus  overlayPane // which sub-pane has focus inside the card overlay
+	overlayScroll int         // scroll offset for the description (top pane)
+	commentsRow   int         // scroll offset for the comments list
+	attachRow     int         // cursor index in the attachments list
 
 	picker    bool
 	pickerRow int
 
 	lastRefresh time.Time
 
+	mdCache map[int]mdCacheEntry // see docsView for shape
+
 	err error
+}
+
+func (b *boardView) cachedMD(id int64, src string, width int) string {
+	if b.mdCache == nil {
+		b.mdCache = map[int]mdCacheEntry{}
+	}
+	if e, ok := b.mdCache[width]; ok && e.id == id {
+		return e.out
+	}
+	out := renderMarkdown(src, width)
+	b.mdCache[width] = mdCacheEntry{id: id, out: out}
+	return out
 }
 
 func newBoardView(s *store.Store, repo *model.Repo) (*boardView, error) {
@@ -128,6 +156,10 @@ func (b *boardView) reload() error {
 	for _, iss := range issues {
 		b.columns[iss.State] = append(b.columns[iss.State], iss)
 	}
+	// Issue descriptions may have changed under us — start the cache
+	// fresh so stale renders aren't served until a new render replaces
+	// them.
+	b.mdCache = nil
 	return nil
 }
 
@@ -204,7 +236,13 @@ func (b *boardView) Help() string {
 	case b.picker:
 		return "j/k move · space toggle · a all · n none · esc close"
 	case b.overlay:
-		return "j/k scroll · g/G top/bottom · esc close"
+		switch b.overlayFocus {
+		case paneComments:
+			return "tab next pane · j/k scroll comments · esc close"
+		case paneAttachments:
+			return "tab next pane · j/k select · enter open · esc close"
+		}
+		return "tab next pane · j/k scroll · g/G top/bottom · esc close"
 	}
 	return "h/l cols · j/k cards · enter open · c columns · H hide col · d detail · r reload · q quit"
 }
@@ -233,29 +271,7 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 		return nil
 	}
 	if b.overlay {
-		switch key.String() {
-		case "esc", "enter":
-			b.overlay = false
-			b.overlayScroll = 0
-		case "j", "down":
-			b.overlayScroll++
-		case "k", "up":
-			if b.overlayScroll > 0 {
-				b.overlayScroll--
-			}
-		case "g", "home":
-			b.overlayScroll = 0
-		case "G", "end":
-			b.overlayScroll = 1 << 30 // clamped at render time
-		case "pgdown", " ":
-			b.overlayScroll += 10
-		case "pgup":
-			b.overlayScroll -= 10
-			if b.overlayScroll < 0 {
-				b.overlayScroll = 0
-			}
-		}
-		return nil
+		return b.updateOverlay(key)
 	}
 	visible := b.visibleStates()
 	switch key.String() {
@@ -307,7 +323,10 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 	case "enter":
 		if b.selected != nil {
 			b.overlay = true
+			b.overlayFocus = paneDescription
 			b.overlayScroll = 0
+			b.commentsRow = 0
+			b.attachRow = 0
 		}
 	case "c":
 		b.openPicker()
@@ -324,6 +343,101 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 	}
 	b.refreshSelection()
 	return nil
+}
+
+// updateOverlay handles input while the fullscreen card overlay is up.
+// Tab cycles focus through description / comments / attachments; j/k/g/G
+// route to the focused pane only.
+func (b *boardView) updateOverlay(key tea.KeyMsg) tea.Cmd {
+	switch key.String() {
+	case "esc":
+		b.overlay = false
+		return nil
+	case "tab":
+		b.overlayFocus = (b.overlayFocus + 1) % 3
+		return nil
+	case "shift+tab":
+		b.overlayFocus = (b.overlayFocus + 2) % 3
+		return nil
+	}
+
+	switch b.overlayFocus {
+	case paneDescription:
+		switch key.String() {
+		case "enter":
+			b.overlay = false
+		case "j", "down":
+			b.overlayScroll++
+		case "k", "up":
+			if b.overlayScroll > 0 {
+				b.overlayScroll--
+			}
+		case "g", "home":
+			b.overlayScroll = 0
+		case "G", "end":
+			b.overlayScroll = 1 << 30
+		case "pgdown", " ":
+			b.overlayScroll += 10
+		case "pgup":
+			b.overlayScroll -= 10
+			if b.overlayScroll < 0 {
+				b.overlayScroll = 0
+			}
+		}
+	case paneComments:
+		switch key.String() {
+		case "enter":
+			b.overlay = false
+		case "j", "down":
+			b.commentsRow++
+		case "k", "up":
+			if b.commentsRow > 0 {
+				b.commentsRow--
+			}
+		case "g", "home":
+			b.commentsRow = 0
+		case "G", "end":
+			b.commentsRow = 1 << 30
+		}
+	case paneAttachments:
+		total := len(b.docLinks) + len(b.prs)
+		switch key.String() {
+		case "enter":
+			// Enter on an attachment is more useful than "close
+			// overlay" — the user can still close via esc.
+			return b.openSelectedAttachment()
+		case "j", "down":
+			if b.attachRow < total-1 {
+				b.attachRow++
+			}
+		case "k", "up":
+			if b.attachRow > 0 {
+				b.attachRow--
+			}
+		case "g", "home":
+			b.attachRow = 0
+		case "G", "end":
+			if total > 0 {
+				b.attachRow = total - 1
+			}
+		}
+	}
+	return nil
+}
+
+// openSelectedAttachment fires an openDocMsg for a selected document so
+// the shell can switch tabs and open it. PRs aren't actionable yet —
+// pressing enter on one is a no-op until we wire a "copy URL" or
+// browser-launch action.
+func (b *boardView) openSelectedAttachment() tea.Cmd {
+	docs := len(b.docLinks)
+	if b.attachRow < 0 || b.attachRow >= docs {
+		return nil
+	}
+	filename := b.docLinks[b.attachRow].DocumentFilename
+	return func() tea.Msg {
+		return openDocMsg{filename: filename}
+	}
 }
 
 func (b *boardView) openPicker() {
@@ -730,7 +844,7 @@ func (b *boardView) renderDetail(width, height int) string {
 	if iss.Description == "" {
 		desc = mutedStyle.Italic(true).Render("(no description — enter for full view)")
 	} else {
-		desc = renderMarkdown(iss.Description, innerWidth)
+		desc = b.cachedMD(iss.ID, iss.Description, innerWidth)
 		desc = clipLines(desc, descRows)
 	}
 
@@ -828,12 +942,12 @@ func (b *boardView) renderOverlayTop(iss *model.Issue, width, height int) string
 		metaRow("updated", iss.UpdatedAt.Format("2006-01-02 15:04")),
 	)
 
-	descHeader := boldStyle.Render("Description")
+	descHeader := paneHeading("Description", b.overlayFocus == paneDescription)
 	var desc string
 	if iss.Description == "" {
 		desc = mutedStyle.Italic(true).Render("(none)")
 	} else {
-		desc = renderMarkdown(iss.Description, contentWidth)
+		desc = b.cachedMD(iss.ID, iss.Description, contentWidth)
 	}
 
 	all := []string{titleLine, ""}
@@ -857,6 +971,17 @@ func (b *boardView) renderOverlayTop(iss *model.Issue, width, height int) string
 	return lipgloss.JoinHorizontal(lipgloss.Top, visible, scrollbar)
 }
 
+// paneHeading returns a section header rendered with an accent indicator
+// when the pane is focused, plain bold when it isn't. The leading "▸"
+// gives the eye a clean target without spending a colour.
+func paneHeading(label string, focused bool) string {
+	if focused {
+		return lipgloss.NewStyle().Bold(true).Foreground(colFocusBorder).
+			Render("▸ " + label)
+	}
+	return boldStyle.Render("  " + label)
+}
+
 // renderOverlayBottom is the side-by-side comments / attachments panes.
 // Both clip to the available height — there's no per-pane scroll yet.
 func (b *boardView) renderOverlayBottom(width, height int) string {
@@ -871,75 +996,111 @@ func (b *boardView) renderOverlayBottom(width, height int) string {
 }
 
 func (b *boardView) renderCommentsPane(width, height int) string {
-	header := boldStyle.Render(fmt.Sprintf("Comments · %d", len(b.comments)))
-	var lines []string
-	lines = append(lines, header)
+	header := paneHeading(fmt.Sprintf("Comments · %d", len(b.comments)),
+		b.overlayFocus == paneComments)
+	var body []string
 	switch {
 	case b.commentsErr != nil:
-		lines = append(lines, errorStyle.Render(b.commentsErr.Error()))
+		body = append(body, errorStyle.Render(b.commentsErr.Error()))
 	case len(b.comments) == 0:
-		lines = append(lines, mutedStyle.Italic(true).Render("(no comments yet)"))
+		body = append(body, mutedStyle.Italic(true).Render("(no comments yet)"))
 	default:
 		for _, c := range b.comments {
 			head := keyStyle.Render(c.Author) +
 				mutedStyle.Render("  "+c.CreatedAt.Format("2006-01-02 15:04"))
-			body := lipgloss.NewStyle().Width(width).Render(oneLine(c.Body))
-			lines = append(lines, head, body, "")
+			line := lipgloss.NewStyle().Width(width).Render(oneLine(c.Body))
+			body = append(body, head, line, "")
 		}
 	}
-	return clipPaneLines(lines, width, height, len(b.comments), "comments")
+	return paneScrollFrame(header, body, width, height, b.commentsRow, false, -1)
 }
 
 func (b *boardView) renderAttachmentsPane(width, height int) string {
 	count := len(b.docLinks) + len(b.prs)
-	header := boldStyle.Render(fmt.Sprintf("Attachments · %d", count))
-	var lines []string
-	lines = append(lines, header)
+	header := paneHeading(fmt.Sprintf("Attachments · %d", count),
+		b.overlayFocus == paneAttachments)
+
+	var body []string
 	switch {
 	case b.attachErr != nil:
-		lines = append(lines, errorStyle.Render(b.attachErr.Error()))
+		body = append(body, errorStyle.Render(b.attachErr.Error()))
 	case count == 0:
-		lines = append(lines, mutedStyle.Italic(true).Render("(none)"))
+		body = append(body, mutedStyle.Italic(true).Render("(none)"))
 	default:
 		for _, l := range b.docLinks {
 			line := mutedStyle.Render("📄 ") + truncate(l.DocumentFilename, width-3)
 			if l.Description != "" {
 				line += mutedStyle.Render("  — " + truncate(l.Description, width/2))
 			}
-			lines = append(lines, line)
+			body = append(body, line)
 		}
 		for _, pr := range b.prs {
-			lines = append(lines, mutedStyle.Render("🔀 ")+truncate(pr.URL, width-3))
+			body = append(body, mutedStyle.Render("🔀 ")+truncate(pr.URL, width-3))
 		}
 	}
-	return clipPaneLines(lines, width, height, count, "items")
+
+	// Cursor only matters when the attachments pane is focused — otherwise
+	// drawing the highlight bar would mislead the user about what j/k
+	// would scroll.
+	cursor := -1
+	if b.overlayFocus == paneAttachments && count > 0 {
+		if b.attachRow >= count {
+			b.attachRow = count - 1
+		}
+		cursor = b.attachRow
+	}
+	return paneScrollFrame(header, body, width, height, 0, true, cursor)
 }
 
-// clipPaneLines pads/truncates a list of pre-rendered lines to exactly
-// `height` rows, replacing the last visible row with a "+N more" muted
-// hint when there's overflow.
-func clipPaneLines(lines []string, width, height, totalItems int, noun string) string {
-	if len(lines) > height {
-		visible := lines[:height-1]
-		hidden := totalItems - countItems(visible) // best-effort
-		hint := mutedStyle.Italic(true).Render(fmt.Sprintf("+%d more %s", hidden, noun))
-		visible = append(visible, hint)
-		lines = visible
+// paneScrollFrame composes a focused-pane: a sticky header row plus a
+// height-1 body window that the caller can scroll (offset) and/or
+// highlight a single row in (cursorIdx). When highlightCursor is false
+// the row offset is treated as a pure scroll position.
+func paneScrollFrame(header string, body []string, width, height, offset int, highlightCursor bool, cursorIdx int) string {
+	rowsAvailable := height - 1
+	if rowsAvailable < 1 {
+		rowsAvailable = 1
 	}
-	for len(lines) < height {
-		lines = append(lines, "")
-	}
-	return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
-}
 
-// countItems is a rough heuristic for "how many entity rows did we already
-// render"; used only for the +N more hint and tolerates miscounts.
-func countItems(rendered []string) int {
-	// Skip the header line; the rest is roughly per-item content + blanks.
-	if len(rendered) == 0 {
-		return 0
+	// Adjust scroll/cursor so the cursor (if any) stays in view.
+	if highlightCursor && cursorIdx >= 0 {
+		if cursorIdx < offset {
+			offset = cursorIdx
+		}
+		if cursorIdx >= offset+rowsAvailable {
+			offset = cursorIdx - rowsAvailable + 1
+		}
 	}
-	return len(rendered) - 1
+	maxOffset := len(body) - rowsAvailable
+	if maxOffset < 0 {
+		maxOffset = 0
+	}
+	if offset > maxOffset {
+		offset = maxOffset
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	end := offset + rowsAvailable
+	if end > len(body) {
+		end = len(body)
+	}
+	visible := append([]string(nil), body[offset:end]...)
+
+	if highlightCursor && cursorIdx >= offset && cursorIdx < end {
+		i := cursorIdx - offset
+		visible[i] = lipgloss.NewStyle().Width(width).
+			Background(cardSelectedBG).Foreground(lipgloss.Color("231")).
+			Render(visible[i])
+	}
+
+	for len(visible) < rowsAvailable {
+		visible = append(visible, "")
+	}
+
+	all := append([]string{header}, visible...)
+	return lipgloss.NewStyle().Width(width).Render(strings.Join(all, "\n"))
 }
 
 func stateLabel(st model.State) string {

@@ -27,7 +27,25 @@ type docsView struct {
 	overlay       bool
 	overlayScroll int
 
+	// Glamour rendering is multi-ms for long docs; cache the rendered
+	// output keyed on terminal width so scrolling within an overlay
+	// doesn't re-run glamour every keystroke. Different widths get
+	// different entries; reload() clears the whole map.
+	mdCache map[int]mdCacheEntry
+
 	err error
+}
+
+func (d *docsView) cachedMD(id int64, src string, width int) string {
+	if d.mdCache == nil {
+		d.mdCache = map[int]mdCacheEntry{}
+	}
+	if e, ok := d.mdCache[width]; ok && e.id == id {
+		return e.out
+	}
+	out := renderMarkdown(src, width)
+	d.mdCache[width] = mdCacheEntry{id: id, out: out}
+	return out
 }
 
 func newDocsView(s *store.Store, repo *model.Repo) *docsView {
@@ -44,6 +62,7 @@ func (d *docsView) reload() {
 		return
 	}
 	d.err = nil
+	d.mdCache = nil // doc bodies may have changed under us
 	// Group rendering uses a stable sort by (type-order, filename). Doing
 	// this here keeps d.row indexing simple — the same flat slice drives
 	// both nav and the grouped view.
@@ -75,6 +94,24 @@ func (d *docsView) currentDoc() *model.Document {
 		d.row = 0
 	}
 	return d.docs[d.row]
+}
+
+// selectByFilename moves the cursor to the doc with the given filename
+// and opens it fullscreen. Called from the shell when the board's
+// attachments pane sends an openDocMsg, so the user lands directly in
+// the doc reader without an intermediate click.
+func (d *docsView) selectByFilename(filename string) {
+	for i, doc := range d.docs {
+		if doc.Filename == filename {
+			d.row = i
+			d.refreshSelection()
+			if d.loaded != nil {
+				d.overlay = true
+				d.overlayScroll = 0
+			}
+			return
+		}
+	}
 }
 
 func (d *docsView) refreshSelection() {
@@ -274,7 +311,7 @@ func (d *docsView) renderPreview(width, height int) string {
 	// matches the fullscreen overlay. Clip to the rows we have available;
 	// it can occasionally cut a styled block mid-element but it's better
 	// than a wall of plain text.
-	body := renderMarkdown(doc.Content, innerWidth)
+	body := d.cachedMD(doc.ID, doc.Content, innerWidth)
 	body = clipLines(body, contentRows)
 
 	hint := mutedStyle.Italic(true).Render("(enter for full view)")
@@ -311,7 +348,7 @@ func (d *docsView) viewOverlay(width, height int) string {
 		doc.CreatedAt.Format("2006-01-02 15:04"),
 		doc.UpdatedAt.Format("2006-01-02 15:04"),
 	))
-	body := renderMarkdown(doc.Content, contentWidth)
+	body := d.cachedMD(doc.ID, doc.Content, contentWidth)
 	if body == "" {
 		body = mutedStyle.Italic(true).Render("(empty)")
 	}
