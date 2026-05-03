@@ -104,6 +104,14 @@ mk issue list                        List issues in the current repo
 
 mk issue show <KEY>                  Show issue + tags + comments + relations
                                      + PRs + linked documents
+mk issue brief <KEY>                 Bulk JSON for skills / LLMs: the issue,
+                                     parent feature, deduped linked docs
+                                     (with full content inlined), comments,
+                                     relations, PRs, and a warnings array.
+                                     Always emits JSON. Single read; replaces
+                                     the show + jq + per-doc-fetch dance.
+  --no-feature-docs                     Skip docs linked to the parent feature
+  --no-comments                         Skip the comments section
 mk issue edit <KEY>
   --title <new title>
   --description <text|->
@@ -124,7 +132,13 @@ mk issue add "Login broken on Safari" -f auth-rewrite \
 mk issue list --state todo,in_progress -o json
 mk issue state MINI-42 in-progress
 mk issue show MINI-42
+
+# Bulk context for an LLM/skill: issue + feature + linked docs (with raw
+# content) + comments, in one read. Always JSON.
+mk issue brief MINI-42 | tee /tmp/ctx.json
 ```
+
+`mk issue brief` returns a single object: `{issue, feature?, relations, pull_requests, documents, comments, warnings}`. Each entry in `documents` carries `filename`, `type`, `description` (the link's `--why`), `linked_via` (one or both of `"issue"` and `"feature/<slug>"`), `source_path`, and `content`. Docs reachable from both the issue and its parent feature are deduped to a single entry whose `linked_via` lists both paths. If the issue and feature link rows have differing `--why` descriptions, the issue's wins and a string is appended to `warnings`.
 
 ### Comments
 

@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -16,6 +18,7 @@ func newIssueCmd() *cobra.Command {
 		issueAddCmd(),
 		issueListCmd(),
 		issueShowCmd(),
+		issueBriefCmd(),
 		issueEditCmd(),
 		issueStateCmd(),
 		issueRmCmd(),
@@ -321,6 +324,188 @@ func issueStateCmd() *cobra.Command {
 			return emit(updated)
 		},
 	}
+}
+
+// issueBrief is the bulk-context payload returned by `mk issue brief`. It's
+// designed for skill / LLM consumption: one read, one structured object,
+// every doc body inlined so the consumer can reason about the issue without
+// chasing N+1 follow-up reads.
+type issueBrief struct {
+	Issue        *model.Issue          `json:"issue"`
+	Feature      *model.Feature        `json:"feature,omitempty"`
+	Relations    *store.IssueRelations `json:"relations"`
+	PullRequests []*model.PullRequest  `json:"pull_requests"`
+	Documents    []*briefDoc           `json:"documents"`
+	Comments     []*model.Comment      `json:"comments"`
+	Warnings     []string              `json:"warnings"`
+}
+
+// briefDoc is a single linked document with its full content inlined and
+// attribution path captured in LinkedVia (e.g. ["issue"], or
+// ["issue", "feature/auth-rewrite"] when the same doc is reachable via
+// both the issue and its parent feature).
+type briefDoc struct {
+	Filename    string             `json:"filename"`
+	Type        model.DocumentType `json:"type"`
+	Description string             `json:"description,omitempty"`
+	SourcePath  string             `json:"source_path,omitempty"`
+	LinkedVia   []string           `json:"linked_via"`
+	Content     string             `json:"content"`
+}
+
+func issueBriefCmd() *cobra.Command {
+	var (
+		noFeatureDocs bool
+		noComments    bool
+	)
+	cmd := &cobra.Command{
+		Use:   "brief <KEY>",
+		Short: "Bulk JSON context for an issue (issue + feature + linked docs with content + comments + relations + PRs)",
+		Long: `Single bulk-context fetch for an issue. Always emits JSON regardless of
+--output, since this verb is structured-data-by-design — it exists to
+collapse the issue + feature + linked-docs + content + comments dance
+that every skill was open-coding into one read.
+
+Linked docs from the parent feature are included by default (use
+--no-feature-docs to skip). Each doc carries a "linked_via" array that
+records every attribution path (e.g. ["issue"] or
+["issue", "feature/auth-rewrite"]).`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+			iss, err := resolveIssueByKey(s, args[0])
+			if err != nil {
+				return err
+			}
+
+			var feat *model.Feature
+			if iss.FeatureID != nil {
+				feat, err = s.GetFeatureByID(*iss.FeatureID)
+				if err != nil {
+					return err
+				}
+			}
+
+			rels, err := s.ListIssueRelations(iss.ID)
+			if err != nil {
+				return err
+			}
+			prs, err := s.ListPRs(iss.ID)
+			if err != nil {
+				return err
+			}
+			if prs == nil {
+				prs = []*model.PullRequest{}
+			}
+
+			docs, warnings, err := collectBriefDocs(s, iss.ID, feat, !noFeatureDocs)
+			if err != nil {
+				return err
+			}
+
+			var comments []*model.Comment
+			if !noComments {
+				comments, err = s.ListComments(iss.ID)
+				if err != nil {
+					return err
+				}
+			}
+			if comments == nil {
+				comments = []*model.Comment{}
+			}
+
+			brief := &issueBrief{
+				Issue:        iss,
+				Feature:      feat,
+				Relations:    rels,
+				PullRequests: prs,
+				Documents:    docs,
+				Comments:     comments,
+				Warnings:     warnings,
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			return enc.Encode(brief)
+		},
+	}
+	cmd.Flags().BoolVar(&noFeatureDocs, "no-feature-docs", false, "skip docs linked to the parent feature")
+	cmd.Flags().BoolVar(&noComments, "no-comments", false, "skip the comments section")
+	return cmd
+}
+
+// collectBriefDocs assembles the deduped document list for an issue brief.
+// Issue links come first; feature links append to existing entries (extending
+// linked_via) or create new ones. When both link rows have differing --why
+// descriptions, the issue's wins and a warning is appended so nothing is
+// silently dropped.
+func collectBriefDocs(s *store.Store, issueID int64, feat *model.Feature, includeFeature bool) ([]*briefDoc, []string, error) {
+	warnings := []string{}
+	out := []*briefDoc{}
+	byDocID := map[int64]*briefDoc{}
+
+	issueLinks, err := s.ListDocumentsLinkedToIssue(issueID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, l := range issueLinks {
+		d, err := s.GetDocumentByID(l.DocumentID, true)
+		if err != nil {
+			return nil, nil, err
+		}
+		entry := &briefDoc{
+			Filename:    d.Filename,
+			Type:        d.Type,
+			Description: l.Description,
+			SourcePath:  d.SourcePath,
+			LinkedVia:   []string{"issue"},
+			Content:     d.Content,
+		}
+		out = append(out, entry)
+		byDocID[d.ID] = entry
+	}
+
+	if includeFeature && feat != nil {
+		featLinks, err := s.ListDocumentsLinkedToFeature(feat.ID)
+		if err != nil {
+			return nil, nil, err
+		}
+		via := "feature/" + feat.Slug
+		for _, l := range featLinks {
+			if existing, ok := byDocID[l.DocumentID]; ok {
+				existing.LinkedVia = append(existing.LinkedVia, via)
+				if l.Description != "" && l.Description != existing.Description {
+					if existing.Description == "" {
+						existing.Description = l.Description
+					} else {
+						warnings = append(warnings, fmt.Sprintf(
+							"document %s: feature link description differs from issue link; using issue's. Feature said: %q",
+							existing.Filename, l.Description))
+					}
+				}
+				continue
+			}
+			d, err := s.GetDocumentByID(l.DocumentID, true)
+			if err != nil {
+				return nil, nil, err
+			}
+			entry := &briefDoc{
+				Filename:    d.Filename,
+				Type:        d.Type,
+				Description: l.Description,
+				SourcePath:  d.SourcePath,
+				LinkedVia:   []string{via},
+				Content:     d.Content,
+			}
+			out = append(out, entry)
+			byDocID[d.ID] = entry
+		}
+	}
+
+	return out, warnings, nil
 }
 
 func issueRmCmd() *cobra.Command {
