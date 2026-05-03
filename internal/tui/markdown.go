@@ -26,8 +26,13 @@ func mdRenderer(width int) *glamour.TermRenderer {
 	if v, ok := mdRenderers.Load(width); ok {
 		return v.(*glamour.TermRenderer)
 	}
+	// WithStandardStyle("dark") not WithAutoStyle() — auto-detect issues
+	// an OSC 11 background-colour query against stdin, which races bubbletea's
+	// own input reader in alt-screen mode and can stall the renderer build
+	// (= a UI freeze the first time a new width appears, e.g. on tab switch
+	// or terminal resize). The TUI is dark-only by design, so we pin it.
 	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(), // dark/light from terminal
+		glamour.WithStandardStyle("dark"),
 		glamour.WithWordWrap(width),
 	)
 	if err != nil {

@@ -12,6 +12,7 @@ import (
 // SnapshotOpts controls non-interactive rendering for layout debugging.
 type SnapshotOpts struct {
 	Target string // tab or overlay name (case-insensitive)
+	Issue  string // optional issue key (e.g. MINI-1) to focus on board/card-overlay
 	Width  int
 	Height int
 }
@@ -51,6 +52,9 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 	switch target {
 	case "board":
 		m.active = 0
+		if err := focusIssue(board, opts.Issue); err != nil {
+			return err
+		}
 	case "features":
 		m.active = 1
 	case "documents", "docs":
@@ -59,6 +63,9 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 		m.active = 3
 	case "card-overlay", "card":
 		m.active = 0
+		if err := focusIssue(board, opts.Issue); err != nil {
+			return err
+		}
 		board.overlay = true
 	case "picker":
 		m.active = 0
@@ -83,4 +90,26 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 	}
 	_, err = os.Stdout.WriteString(out)
 	return err
+}
+
+// focusIssue repositions the board so the issue with the given key (e.g.
+// "MINI-1") becomes the selected card. Returns an error if the key is set
+// but doesn't match any visible issue. A blank key is a no-op.
+func focusIssue(b *boardView, key string) error {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil
+	}
+	visible := b.visibleStates()
+	for ci, st := range visible {
+		for ri, iss := range b.columns[st] {
+			if strings.EqualFold(iss.Key, key) {
+				b.col = ci
+				b.rows[st] = ri
+				b.refreshSelection()
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("issue %q not found in any visible column", key)
 }

@@ -107,6 +107,8 @@ func (f *featuresView) Init() tea.Cmd    { return nil }
 func (f *featuresView) Status() string   { return "" }
 func (f *featuresView) HasOverlay() bool { return f.overlay }
 
+func (f *featuresView) CloseOverlay() { f.overlay = false }
+
 func (f *featuresView) Help() string {
 	if f.overlay {
 		return "j/k scroll · g/G top/bottom · esc close"
@@ -345,12 +347,6 @@ func (f *featuresView) renderDetail(width, height int) string {
 }
 
 func (f *featuresView) viewOverlay(width, height int) string {
-	// Box uses Padding(1, 2): true content area = (width-2) - 4 = width-6.
-	innerWidth := width - 6
-	if innerWidth < 20 {
-		innerWidth = 20
-	}
-
 	if f.selected == nil {
 		return lipgloss.NewStyle().
 			Border(colBorder).BorderForeground(colFocusBorder).
@@ -358,7 +354,7 @@ func (f *featuresView) viewOverlay(width, height int) string {
 			Render("No feature selected.")
 	}
 
-	contentWidth := innerWidth - 1
+	contentWidth := width - 7
 	if contentWidth < 10 {
 		contentWidth = 10
 	}
@@ -396,30 +392,5 @@ func (f *featuresView) viewOverlay(width, height int) string {
 
 	all := []string{title, meta, "", descHeader, desc, "", issuesHeader}
 	all = append(all, issueBlocks...)
-	full := strings.Join(all, "\n")
-
-	innerHeight := height - 2 - 2
-	if innerHeight < 3 {
-		innerHeight = 3
-	}
-
-	totalLineCount := totalLines(full)
-	maxScroll := max(0, totalLineCount-innerHeight)
-	if f.overlayScroll > maxScroll {
-		f.overlayScroll = maxScroll
-	}
-
-	visible := scrollLines(full, f.overlayScroll, innerHeight)
-	if missing := innerHeight - totalLines(visible); missing > 0 {
-		visible += strings.Repeat("\n", missing)
-	}
-	visible = lipgloss.NewStyle().Width(contentWidth).Render(visible)
-
-	scrollbar := renderVerticalScrollbar(innerHeight, totalLineCount, f.overlayScroll)
-	combined := lipgloss.JoinHorizontal(lipgloss.Top, visible, scrollbar)
-
-	return lipgloss.NewStyle().
-		Border(colBorder).BorderForeground(colFocusBorder).
-		Width(width-2).Padding(1, 2).
-		Render(combined)
+	return markdownPanel(width, height, strings.Join(all, "\n"), &f.overlayScroll, true)
 }

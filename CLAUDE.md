@@ -38,3 +38,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## TUI cookbook
 
 `docs/tui-cookbook.md` is a synthesised reference for bubbletea v1.3.10 + lipgloss v1.1.0 + bubbles. Read it before doing anything non-trivial in `internal/tui/`. The snippets are pinned to v1; upstream READMEs have already moved to v2 and will mislead you.
+
+## Text panels
+
+Fullscreen card / feature / document overlays share a single shape — bordered, padded, with a vertical scrollbar — implemented in `internal/tui/panel.go`. Use `markdownPanel(width, height, body, *scroll)` for a stand-alone bordered overlay; use `scrollableBlock(width, height, body, *scroll)` when the surrounding layout already owns the border (e.g. the top half of the card overlay's split). Both helpers strict-clip to the requested size, so a too-long body can't stretch the frame and a too-short body is padded — that's how we avoid the "panel grows with content" bug. `*scroll` is clamped in place.
+
+## Runes vs cells (Unicode width)
+
+A *rune* is one Unicode code point; a *cell* is one column of terminal grid. ASCII is 1:1, but emoji and CJK are 1 rune / 2 cells, combining marks are N runes / 1 cell, and ZWJ sequences (e.g. 👨‍👩‍👧) collapse many runes into one glyph. `internal/tui/helpers.go`'s `truncate` measures *runes* — fine for ASCII filenames and keys, but if a user-supplied string (issue title, comment body, document name) contains emoji, the truncated line will be shorter cell-wise than expected. lipgloss's own `Width()` is cell-aware (via go-runewidth) and pads correctly, so the symptom is usually a small visual gap, not overflow. Swap `truncate` to `runewidth.Truncate` if a panel ever shows visible emoji-driven misalignment.
+
+## TUI snapshots (visual debugging)
+
+`mk tui --snapshot <target>` renders one TUI view to stdout non-interactively, so you can inspect layout bugs without a real terminal. Targets: `board`, `features`, `docs`, `history`, `card-overlay`, `doc-overlay`, `feature-overlay`, `picker`. Use `--width`/`--height` to fix the viewport and `--issue MINI-1` to focus a specific card before opening `card-overlay` (or to position the cursor on `board`). Implementation is in `internal/tui/snapshot.go`; reproducing a visual bug is usually one command, e.g. `mk tui --snapshot card-overlay --issue MINI-1 --width 140 --height 50 > /tmp/x.ansi`.

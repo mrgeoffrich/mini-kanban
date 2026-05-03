@@ -9,6 +9,7 @@ import (
 func newTUICmd() *cobra.Command {
 	var (
 		snapshot string
+		snapIss  string
 		snapW    int
 		snapH    int
 	)
@@ -39,6 +40,7 @@ Snapshot targets:
 			if snapshot != "" {
 				return tui.Snapshot(s, repo, tui.SnapshotOpts{
 					Target: snapshot,
+					Issue:  snapIss,
 					Width:  snapW,
 					Height: snapH,
 				})
@@ -47,6 +49,7 @@ Snapshot targets:
 		},
 	}
 	cmd.Flags().StringVar(&snapshot, "snapshot", "", "render a view to stdout instead of starting the TUI (board|features|docs|history|card-overlay|doc-overlay|feature-overlay|picker)")
+	cmd.Flags().StringVar(&snapIss, "issue", "", "issue key (e.g. MINI-1) to focus for board/card-overlay snapshots")
 	cmd.Flags().IntVar(&snapW, "width", 120, "terminal width for --snapshot")
 	cmd.Flags().IntVar(&snapH, "height", 40, "terminal height for --snapshot")
 	return cmd

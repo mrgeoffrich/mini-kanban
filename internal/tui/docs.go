@@ -134,6 +134,8 @@ func (d *docsView) Init() tea.Cmd    { return nil }
 func (d *docsView) Status() string   { return "" }
 func (d *docsView) HasOverlay() bool { return d.overlay }
 
+func (d *docsView) CloseOverlay() { d.overlay = false }
+
 func (d *docsView) Help() string {
 	if d.overlay {
 		return "j/k scroll · g/G top/bottom · esc close"
@@ -321,12 +323,6 @@ func (d *docsView) renderPreview(width, height int) string {
 }
 
 func (d *docsView) viewOverlay(width, height int) string {
-	// Box uses Padding(1, 2): true content area = (width-2) - 4 = width-6.
-	innerWidth := width - 6
-	if innerWidth < 20 {
-		innerWidth = 20
-	}
-
 	if d.loaded == nil {
 		return lipgloss.NewStyle().
 			Border(colBorder).BorderForeground(colFocusBorder).
@@ -334,9 +330,9 @@ func (d *docsView) viewOverlay(width, height int) string {
 			Render("No document selected.")
 	}
 
-	// Reserve the rightmost column for the scrollbar so it sits flush
-	// inside the bordered box.
-	contentWidth := innerWidth - 1
+	// markdownPanel reserves a column for the scrollbar, so wrap markdown
+	// to (innerWidth - 1) for a clean right edge.
+	contentWidth := width - 7
 	if contentWidth < 10 {
 		contentWidth = 10
 	}
@@ -354,33 +350,7 @@ func (d *docsView) viewOverlay(width, height int) string {
 	}
 
 	full := strings.Join([]string{title, meta, "", body}, "\n")
-	innerHeight := height - 2 - 2
-	if innerHeight < 3 {
-		innerHeight = 3
-	}
-
-	totalLineCount := totalLines(full)
-	maxScroll := max(0, totalLineCount-innerHeight)
-	if d.overlayScroll > maxScroll {
-		d.overlayScroll = maxScroll
-	}
-
-	visible := scrollLines(full, d.overlayScroll, innerHeight)
-	if missing := innerHeight - totalLines(visible); missing > 0 {
-		visible += strings.Repeat("\n", missing)
-	}
-	// Pad each visible line to contentWidth so the scrollbar lines up at
-	// the same x-coordinate every row regardless of the content's natural
-	// width.
-	visible = lipgloss.NewStyle().Width(contentWidth).Render(visible)
-
-	scrollbar := renderVerticalScrollbar(innerHeight, totalLineCount, d.overlayScroll)
-	combined := lipgloss.JoinHorizontal(lipgloss.Top, visible, scrollbar)
-
-	return lipgloss.NewStyle().
-		Border(colBorder).BorderForeground(colFocusBorder).
-		Width(width-2).Padding(1, 2).
-		Render(combined)
+	return markdownPanel(width, height, full, &d.overlayScroll, true)
 }
 
 // stringDocType returns a human-friendly label for the doc-type group

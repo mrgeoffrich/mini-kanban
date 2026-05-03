@@ -4,8 +4,10 @@
 // strip, and the top-level key bindings (quit, switch tab). Each tab is a
 // `view`: a self-contained widget that handles its own input, state, and
 // rendering. Views can declare an active overlay (e.g. fullscreen card or
-// document viewer); when one is up, the shell routes all keys to the view
-// and stops intercepting tab/digit/quit so the overlay can own the screen.
+// document viewer); when one is up the shell routes q/esc/tab to the view
+// (so esc closes the overlay, tab cycles inner panes), but digit
+// shortcuts always win — switching tabs from inside an overlay closes
+// that overlay so coming back lands on the base layout.
 package tui
 
 import (
@@ -32,6 +34,10 @@ type view interface {
 	View(width, height int) string
 	Help() string
 	HasOverlay() bool
+	// CloseOverlay dismisses any open overlay so the next time this tab
+	// is activated it renders its base layout. Called by the shell when
+	// the user switches tabs from inside an overlay.
+	CloseOverlay()
 	Status() string
 }
 
@@ -62,6 +68,7 @@ func Run(s *store.Store, repo *model.Repo) error {
 			{"Documents", newDocsView(s, repo)},
 			{"History", newHistoryView(s, repo)},
 		},
+		returnTab: -1,
 	}
 	p := tea.NewProgram(m, tea.WithAltScreen())
 	_, err = p.Run()
@@ -74,6 +81,13 @@ type Model struct {
 	active int
 	width  int
 	height int
+	// returnTab is set when a cross-tab jump (e.g. opening a doc
+	// attachment from the board) lands the user on a tab with an open
+	// overlay; closing that overlay restores the previous tab. -1 when
+	// no return is pending. Cleared whenever the user navigates
+	// explicitly (digit/tab/shift+tab) so a manual swap doesn't bounce
+	// back later.
+	returnTab int
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -96,7 +110,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 	case openDocMsg:
-		// Cross-tab: hand the filename to the Documents tab and focus it.
+		// Cross-tab: hand the filename to the Documents tab and focus
+		// it. Remember where we came from so esc on the doc overlay
+		// returns the user there.
 		for i, t := range m.tabs {
 			if t.name != "Documents" {
 				continue
@@ -104,42 +120,61 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if dv, ok := t.v.(*docsView); ok {
 				dv.selectByFilename(msg.filename)
 			}
+			if m.active != i {
+				m.returnTab = m.active
+			}
 			m.active = i
 			return m, nil
 		}
 		return m, nil
 	case tea.KeyMsg:
-		// ctrl+c always quits, even past an overlay.
-		if msg.String() == "ctrl+c" {
+		// ctrl+c and q always quit, even past an overlay. esc stays
+		// view-routed when an overlay is up so it closes the overlay
+		// rather than the program.
+		switch msg.String() {
+		case "ctrl+c", "q":
 			return m, tea.Quit
 		}
-		// When no overlay is up, shell-level keys win. Otherwise the
-		// active view handles everything (so esc closes the overlay
-		// instead of quitting the program, etc).
-		if !m.tabs[m.active].v.HasOverlay() {
-			s := msg.String()
+		s := msg.String()
+		hasOverlay := m.tabs[m.active].v.HasOverlay()
+
+		// Digit shortcuts always win — the user can jump screens from
+		// anywhere, including inside an overlay. Close the leaving
+		// view's overlay first so coming back lands on its base layout.
+		// (tab/shift+tab are intentionally NOT global: views use tab to
+		// cycle their inner panes, e.g. description ↔ comments ↔
+		// attachments inside the card overlay.)
+		if idx, ok := digitSwitchTarget(s, len(m.tabs)); ok {
+			if idx != m.active {
+				m.tabs[m.active].v.CloseOverlay()
+				m.active = idx
+				m.returnTab = -1 // explicit nav cancels any pending auto-return
+			}
+			return m, nil
+		}
+
+		if !hasOverlay {
 			switch s {
-			case "q", "esc":
+			case "esc":
 				return m, tea.Quit
 			case "tab":
 				m.active = (m.active + 1) % len(m.tabs)
+				m.returnTab = -1
 				return m, nil
 			case "shift+tab":
 				m.active = (m.active - 1 + len(m.tabs)) % len(m.tabs)
+				m.returnTab = -1
 				return m, nil
 			}
-			// Digit shortcuts: "1" through "9" jump to that tab if it
-			// exists. Dynamic so adding a 5th view doesn't need a code
-			// change here.
-			if len(s) == 1 && s[0] >= '1' && s[0] <= '9' {
-				idx := int(s[0] - '1')
-				if idx < len(m.tabs) {
-					m.active = idx
-					return m, nil
-				}
-			}
 		}
-		return m, m.tabs[m.active].v.Update(msg)
+		cmd := m.tabs[m.active].v.Update(msg)
+		// If the active view just closed its overlay AND we have a
+		// pending return target (set by openDocMsg), bounce back.
+		if hasOverlay && !m.tabs[m.active].v.HasOverlay() && m.returnTab >= 0 {
+			m.active = m.returnTab
+			m.returnTab = -1
+		}
+		return m, cmd
 	}
 	// Non-key, non-windowsize messages (ticks, custom commands) get
 	// broadcast to every view so a tab can receive replies to its own
@@ -211,6 +246,20 @@ func (m *Model) renderHeader() string {
 	}
 	spacer := lipgloss.NewStyle().Width(gap).Render("")
 	return lipgloss.JoinHorizontal(lipgloss.Top, repoTag, spacer, tabs)
+}
+
+// digitSwitchTarget maps a "1"–"9" key to a 0-based tab index. Returns
+// (idx, true) only when the digit names a valid tab; out-of-range
+// digits fall through to the view rather than being silently swallowed.
+func digitSwitchTarget(key string, n int) (int, bool) {
+	if len(key) != 1 || key[0] < '1' || key[0] > '9' {
+		return 0, false
+	}
+	idx := int(key[0] - '1')
+	if idx >= n {
+		return 0, false
+	}
+	return idx, true
 }
 
 // parseRepoOwner extracts the owner/org segment from a git remote URL. It

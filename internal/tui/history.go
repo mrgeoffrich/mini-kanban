@@ -49,6 +49,7 @@ func (h *historyView) reload() {
 func (h *historyView) Init() tea.Cmd    { return nil }
 func (h *historyView) Status() string   { return "" }
 func (h *historyView) HasOverlay() bool { return false }
+func (h *historyView) CloseOverlay()    {}
 
 func (h *historyView) Help() string {
 	return "j/k scroll · g/G top/bottom · r reload · q quit"
