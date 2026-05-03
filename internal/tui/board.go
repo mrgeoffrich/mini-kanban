@@ -39,9 +39,12 @@ type boardView struct {
 	scroll        map[model.State]int // top visible card index per column
 	detailVisible bool
 
-	selected    *model.Issue
-	comments    []*model.Comment
-	commentsErr error
+	selected     *model.Issue
+	comments     []*model.Comment
+	commentsErr  error
+	docLinks     []*model.DocumentLink
+	prs          []*model.PullRequest
+	attachErr    error
 
 	overlay       bool
 	overlayScroll int
@@ -148,14 +151,18 @@ func (b *boardView) currentIssue() *model.Issue {
 	return issues[r]
 }
 
-// refreshSelection re-fetches comments only when the selected issue changes
-// — keeps navigation snappy without a separate cache.
+// refreshSelection re-fetches comments and attachments only when the
+// selected issue changes — keeps navigation snappy without a separate
+// cache.
 func (b *boardView) refreshSelection() {
 	iss := b.currentIssue()
 	if iss == nil {
 		b.selected = nil
 		b.comments = nil
 		b.commentsErr = nil
+		b.docLinks = nil
+		b.prs = nil
+		b.attachErr = nil
 		return
 	}
 	if b.selected != nil && b.selected.ID == iss.ID {
@@ -166,6 +173,18 @@ func (b *boardView) refreshSelection() {
 	cs, err := b.store.ListComments(iss.ID)
 	b.comments = cs
 	b.commentsErr = err
+	docs, derr := b.store.ListDocumentsLinkedToIssue(iss.ID)
+	b.docLinks = docs
+	prs, perr := b.store.ListPRs(iss.ID)
+	b.prs = prs
+	switch {
+	case derr != nil:
+		b.attachErr = derr
+	case perr != nil:
+		b.attachErr = perr
+	default:
+		b.attachErr = nil
+	}
 	b.overlayScroll = 0
 }
 
@@ -554,8 +573,11 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 		Align(lipgloss.Center).
 		Render(fmt.Sprintf("%s · %d%s", stateLabel(st), len(issues), indicator))
 
-	cardStyle := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1)
-	selStyle := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
+	// Cards run flush against the column border on purpose: when columns
+	// get narrow, every column counts. The spacious vs packed layout below
+	// uses the full inner width on continuation lines.
+	cardStyle := lipgloss.NewStyle().Width(innerWidth)
+	selStyle := lipgloss.NewStyle().Width(innerWidth).
 		Background(cardSelectedBG).Foreground(lipgloss.Color("231"))
 
 	var lines []string
@@ -565,7 +587,8 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 	for i := scroll; i < end; i++ {
 		iss := issues[i]
 		bracketed := "[" + iss.Key + "]"
-		fullW := innerWidth - 2
+		// No more cardStyle padding — content uses the full inner width.
+		fullW := innerWidth
 
 		isSel := i == sel && focused
 		styler := cardStyle
@@ -593,7 +616,7 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 		// Title needs both lines. Pack [KEY] + the start of the title on
 		// line 0, then the continuation on line 1.
 		prefixW := len(bracketed) + 2 // [KEY] + two-space gutter
-		firstW := innerWidth - 2 - prefixW
+		firstW := innerWidth - prefixW
 		if firstW < 4 {
 			firstW = 4
 		}
@@ -656,8 +679,24 @@ func (b *boardView) renderDetail(width, height int) string {
 
 	iss := b.selected
 	bracketedKey := "[" + iss.Key + "]"
-	titleLine := keyStyle.Bold(true).Render(bracketedKey) + "  " +
-		boldStyle.Render(truncate(iss.Title, innerWidth-len(bracketedKey)-2))
+	previewTag := mutedStyle.Italic(true).Render("preview")
+	previewW := lipgloss.Width(previewTag)
+	// Reserve room on the right for the "preview" label plus a 2-col gap.
+	titleSpace := innerWidth - len(bracketedKey) - 2 - previewW - 2
+	if titleSpace < 4 {
+		titleSpace = 4
+	}
+	titleContent := keyStyle.Bold(true).Render(bracketedKey) + "  " +
+		boldStyle.Render(truncate(iss.Title, titleSpace))
+	gap := innerWidth - lipgloss.Width(titleContent) - previewW
+	if gap < 1 {
+		gap = 1
+	}
+	titleLine := lipgloss.JoinHorizontal(lipgloss.Top,
+		titleContent,
+		lipgloss.NewStyle().Width(gap).Render(""),
+		previewTag,
+	)
 
 	metaParts := []string{"state: " + stateLabel(iss.State)}
 	if iss.FeatureSlug != "" {
@@ -705,9 +744,10 @@ func (b *boardView) renderDetail(width, height int) string {
 	return box.Render(content)
 }
 
-// viewOverlay renders a fullscreen card view: title, metadata, the full
-// description, and the full comment thread, all within a single scrollable
-// region.
+// viewOverlay renders the fullscreen card view as a vertical split:
+//   - top ~70% — title, metadata, scrollable description (with scrollbar)
+//   - bottom ~30% — two side-by-side panes: comments (left) | attachments
+//     (right), each clipped to fit with a "+N more" hint when overflowing.
 func (b *boardView) viewOverlay(width, height int) string {
 	innerWidth := width - 4
 	if innerWidth < 20 {
@@ -720,6 +760,49 @@ func (b *boardView) viewOverlay(width, height int) string {
 			Border(colBorder).BorderForeground(colFocusBorder).
 			Width(width - 2).Height(height - 2).Padding(1, 2).
 			Render("No issue selected.")
+	}
+
+	innerHeight := height - 2 - 2 // borders (2) + vertical padding (2)
+	if innerHeight < 8 {
+		innerHeight = 8
+	}
+
+	// Vertical split. Bottom takes ~30% and is bounded so it stays usable
+	// on tall terminals and doesn't disappear on short ones. The 1-row
+	// divider sits between the two halves.
+	bottomH := innerHeight * 3 / 10
+	if bottomH < 6 {
+		bottomH = 6
+	}
+	if bottomH > innerHeight-6 {
+		bottomH = max(3, innerHeight-6)
+	}
+	topH := innerHeight - bottomH - 1 // -1 for divider
+	if topH < 3 {
+		topH = 3
+	}
+
+	top := b.renderOverlayTop(iss, innerWidth, topH)
+	divider := mutedStyle.Render(strings.Repeat("─", innerWidth))
+	bottom := b.renderOverlayBottom(innerWidth, bottomH)
+
+	body := lipgloss.JoinVertical(lipgloss.Left, top, divider, bottom)
+
+	return lipgloss.NewStyle().
+		Border(colBorder).
+		BorderForeground(colFocusBorder).
+		Width(width - 2).
+		Padding(1, 2).
+		Render(body)
+}
+
+// renderOverlayTop is the scrollable upper region: title, metadata, and the
+// full markdown description. The right column carries a scrollbar so users
+// can see how much description they have left.
+func (b *boardView) renderOverlayTop(iss *model.Issue, width, height int) string {
+	contentWidth := width - 1 // 1 col reserved for scrollbar
+	if contentWidth < 10 {
+		contentWidth = 10
 	}
 
 	titleLine := keyStyle.Bold(true).Render("["+iss.Key+"]") + "  " +
@@ -748,70 +831,113 @@ func (b *boardView) viewOverlay(width, height int) string {
 	if iss.Description == "" {
 		desc = mutedStyle.Italic(true).Render("(none)")
 	} else {
-		desc = renderMarkdown(iss.Description, innerWidth)
-	}
-
-	var commentBlocks []string
-	commentHeader := boldStyle.Render(fmt.Sprintf("Comments · %d", len(b.comments)))
-	if b.commentsErr != nil {
-		commentBlocks = append(commentBlocks, errorStyle.Render(b.commentsErr.Error()))
-	} else if len(b.comments) == 0 {
-		commentBlocks = append(commentBlocks, mutedStyle.Italic(true).Render("(no comments yet)"))
-	} else {
-		for _, c := range b.comments {
-			head := keyStyle.Render(c.Author) + mutedStyle.Render("  "+c.CreatedAt.Format("2006-01-02 15:04"))
-			// Comment bodies render through glamour at slightly indented
-			// width so threaded replies stay visually nested without
-			// glamour breaking on the leading padding.
-			body := renderMarkdown(c.Body, innerWidth-2)
-			body = indentLines(body, "  ")
-			commentBlocks = append(commentBlocks, head+"\n"+body)
-		}
+		desc = renderMarkdown(iss.Description, contentWidth)
 	}
 
 	all := []string{titleLine, ""}
 	all = append(all, metaLines...)
-	all = append(all, "", descHeader, desc, "", commentHeader)
-	all = append(all, commentBlocks...)
+	all = append(all, "", descHeader, desc)
 
 	full := strings.Join(all, "\n")
-	innerHeight := height - 2 - 2 // borders + padding rows
-	if innerHeight < 3 {
-		innerHeight = 3
-	}
-
 	totalLineCount := totalLines(full)
-	maxScroll := max(0, totalLineCount-innerHeight)
+	maxScroll := max(0, totalLineCount-height)
 	if b.overlayScroll > maxScroll {
 		b.overlayScroll = maxScroll
 	}
 
-	visible := scrollLines(full, b.overlayScroll, innerHeight)
-
-	// Pad the visible region so the bordered box has a stable shape.
-	if missing := innerHeight - totalLines(visible); missing > 0 {
+	visible := scrollLines(full, b.overlayScroll, height)
+	if missing := height - totalLines(visible); missing > 0 {
 		visible += strings.Repeat("\n", missing)
 	}
+	visible = lipgloss.NewStyle().Width(contentWidth).Render(visible)
 
-	scrollHint := ""
-	if maxScroll > 0 {
-		scrollHint = mutedStyle.Render(fmt.Sprintf(" %d/%d ", b.overlayScroll, maxScroll))
+	scrollbar := renderVerticalScrollbar(height, totalLineCount, b.overlayScroll)
+	return lipgloss.JoinHorizontal(lipgloss.Top, visible, scrollbar)
+}
+
+// renderOverlayBottom is the side-by-side comments / attachments panes.
+// Both clip to the available height — there's no per-pane scroll yet.
+func (b *boardView) renderOverlayBottom(width, height int) string {
+	leftW := width / 2
+	rightW := width - leftW - 1 // -1 for vertical separator column
+
+	left := b.renderCommentsPane(leftW, height)
+	right := b.renderAttachmentsPane(rightW, height)
+	sepCol := strings.TrimRight(strings.Repeat(mutedStyle.Render("│")+"\n", height), "\n")
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, sepCol, right)
+}
+
+func (b *boardView) renderCommentsPane(width, height int) string {
+	header := boldStyle.Render(fmt.Sprintf("Comments · %d", len(b.comments)))
+	var lines []string
+	lines = append(lines, header)
+	switch {
+	case b.commentsErr != nil:
+		lines = append(lines, errorStyle.Render(b.commentsErr.Error()))
+	case len(b.comments) == 0:
+		lines = append(lines, mutedStyle.Italic(true).Render("(no comments yet)"))
+	default:
+		for _, c := range b.comments {
+			head := keyStyle.Render(c.Author) +
+				mutedStyle.Render("  "+c.CreatedAt.Format("2006-01-02 15:04"))
+			body := lipgloss.NewStyle().Width(width).Render(oneLine(c.Body))
+			lines = append(lines, head, body, "")
+		}
 	}
+	return clipPaneLines(lines, width, height, len(b.comments), "comments")
+}
 
-	box := lipgloss.NewStyle().
-		Border(colBorder).
-		BorderForeground(colFocusBorder).
-		Width(width - 2).
-		Padding(1, 2).
-		Render(visible)
-
-	if scrollHint != "" {
-		// Anchor the scroll indicator to the bottom-right.
-		box = lipgloss.JoinVertical(lipgloss.Left, box,
-			lipgloss.NewStyle().Width(width-2).Align(lipgloss.Right).Render(scrollHint),
-		)
+func (b *boardView) renderAttachmentsPane(width, height int) string {
+	count := len(b.docLinks) + len(b.prs)
+	header := boldStyle.Render(fmt.Sprintf("Attachments · %d", count))
+	var lines []string
+	lines = append(lines, header)
+	switch {
+	case b.attachErr != nil:
+		lines = append(lines, errorStyle.Render(b.attachErr.Error()))
+	case count == 0:
+		lines = append(lines, mutedStyle.Italic(true).Render("(none)"))
+	default:
+		for _, l := range b.docLinks {
+			line := mutedStyle.Render("📄 ") + truncate(l.DocumentFilename, width-3)
+			if l.Description != "" {
+				line += mutedStyle.Render("  — " + truncate(l.Description, width/2))
+			}
+			lines = append(lines, line)
+		}
+		for _, pr := range b.prs {
+			lines = append(lines, mutedStyle.Render("🔀 ")+truncate(pr.URL, width-3))
+		}
 	}
-	return box
+	return clipPaneLines(lines, width, height, count, "items")
+}
+
+// clipPaneLines pads/truncates a list of pre-rendered lines to exactly
+// `height` rows, replacing the last visible row with a "+N more" muted
+// hint when there's overflow.
+func clipPaneLines(lines []string, width, height, totalItems int, noun string) string {
+	if len(lines) > height {
+		visible := lines[:height-1]
+		hidden := totalItems - countItems(visible) // best-effort
+		hint := mutedStyle.Italic(true).Render(fmt.Sprintf("+%d more %s", hidden, noun))
+		visible = append(visible, hint)
+		lines = visible
+	}
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
+}
+
+// countItems is a rough heuristic for "how many entity rows did we already
+// render"; used only for the +N more hint and tolerates miscounts.
+func countItems(rendered []string) int {
+	// Skip the header line; the rest is roughly per-item content + blanks.
+	if len(rendered) == 0 {
+		return 0
+	}
+	return len(rendered) - 1
 }
 
 func stateLabel(st model.State) string {

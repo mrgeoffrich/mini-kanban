@@ -296,6 +296,13 @@ func (d *docsView) viewOverlay(width, height int) string {
 			Render("No document selected.")
 	}
 
+	// Reserve the rightmost column for the scrollbar so it sits flush
+	// inside the bordered box.
+	contentWidth := innerWidth - 1
+	if contentWidth < 10 {
+		contentWidth = 10
+	}
+
 	doc := d.loaded
 	title := boldStyle.Render(doc.Filename)
 	meta := mutedStyle.Render(fmt.Sprintf("%s · %s · created %s · updated %s",
@@ -303,7 +310,7 @@ func (d *docsView) viewOverlay(width, height int) string {
 		doc.CreatedAt.Format("2006-01-02 15:04"),
 		doc.UpdatedAt.Format("2006-01-02 15:04"),
 	))
-	body := renderMarkdown(doc.Content, innerWidth)
+	body := renderMarkdown(doc.Content, contentWidth)
 	if body == "" {
 		body = mutedStyle.Italic(true).Render("(empty)")
 	}
@@ -324,18 +331,18 @@ func (d *docsView) viewOverlay(width, height int) string {
 	if missing := innerHeight - totalLines(visible); missing > 0 {
 		visible += strings.Repeat("\n", missing)
 	}
+	// Pad each visible line to contentWidth so the scrollbar lines up at
+	// the same x-coordinate every row regardless of the content's natural
+	// width.
+	visible = lipgloss.NewStyle().Width(contentWidth).Render(visible)
 
-	box := lipgloss.NewStyle().
+	scrollbar := renderVerticalScrollbar(innerHeight, totalLineCount, d.overlayScroll)
+	combined := lipgloss.JoinHorizontal(lipgloss.Top, visible, scrollbar)
+
+	return lipgloss.NewStyle().
 		Border(colBorder).BorderForeground(colFocusBorder).
 		Width(width - 2).Padding(1, 2).
-		Render(visible)
-	if maxScroll > 0 {
-		hint := mutedStyle.Render(fmt.Sprintf(" %d/%d ", d.overlayScroll, maxScroll))
-		box = lipgloss.JoinVertical(lipgloss.Left, box,
-			lipgloss.NewStyle().Width(width-2).Align(lipgloss.Right).Render(hint),
-		)
-	}
-	return box
+		Render(combined)
 }
 
 // stringDocType returns a human-friendly label for the doc-type group

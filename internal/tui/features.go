@@ -342,6 +342,11 @@ func (f *featuresView) viewOverlay(width, height int) string {
 			Render("No feature selected.")
 	}
 
+	contentWidth := innerWidth - 1
+	if contentWidth < 10 {
+		contentWidth = 10
+	}
+
 	feat := f.selected
 	title := boldStyle.Render(feat.Title)
 	meta := mutedStyle.Render(fmt.Sprintf("[%s] · created %s · updated %s",
@@ -355,7 +360,7 @@ func (f *featuresView) viewOverlay(width, height int) string {
 	if feat.Description == "" {
 		desc = mutedStyle.Italic(true).Render("(none)")
 	} else {
-		desc = renderMarkdown(feat.Description, innerWidth)
+		desc = renderMarkdown(feat.Description, contentWidth)
 	}
 
 	issuesHeader := boldStyle.Render(fmt.Sprintf("Issues · %d", len(f.issues)))
@@ -392,16 +397,13 @@ func (f *featuresView) viewOverlay(width, height int) string {
 	if missing := innerHeight - totalLines(visible); missing > 0 {
 		visible += strings.Repeat("\n", missing)
 	}
+	visible = lipgloss.NewStyle().Width(contentWidth).Render(visible)
 
-	box := lipgloss.NewStyle().
+	scrollbar := renderVerticalScrollbar(innerHeight, totalLineCount, f.overlayScroll)
+	combined := lipgloss.JoinHorizontal(lipgloss.Top, visible, scrollbar)
+
+	return lipgloss.NewStyle().
 		Border(colBorder).BorderForeground(colFocusBorder).
 		Width(width - 2).Padding(1, 2).
-		Render(visible)
-	if maxScroll > 0 {
-		marker := mutedStyle.Render(fmt.Sprintf(" %d/%d ", f.overlayScroll, maxScroll))
-		box = lipgloss.JoinVertical(lipgloss.Left, box,
-			lipgloss.NewStyle().Width(width-2).Align(lipgloss.Right).Render(marker),
-		)
-	}
-	return box
+		Render(combined)
 }
