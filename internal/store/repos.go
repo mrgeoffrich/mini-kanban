@@ -51,18 +51,6 @@ func (s *Store) ListRepos() ([]*model.Repo, error) {
 	return out, rows.Err()
 }
 
-// AllocateIssueNumber atomically returns and increments next_issue_number.
-func (s *Store) AllocateIssueNumber(tx *sql.Tx, repoID int64) (int64, error) {
-	var n int64
-	if err := tx.QueryRow(`SELECT next_issue_number FROM repos WHERE id = ?`, repoID).Scan(&n); err != nil {
-		return 0, err
-	}
-	if _, err := tx.Exec(`UPDATE repos SET next_issue_number = next_issue_number + 1 WHERE id = ?`, repoID); err != nil {
-		return 0, err
-	}
-	return n, nil
-}
-
 type rowScanner interface {
 	Scan(dest ...any) error
 }

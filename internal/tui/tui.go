@@ -121,9 +121,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.tabs[m.active].v.Update(msg)
 	}
-	// Non-key, non-windowsize messages (ticks, custom messages from
-	// commands) get broadcast to every view so a tab can receive replies
-	// to its own commands even while another tab is active.
+	// Non-key, non-windowsize messages (ticks, custom commands) get
+	// broadcast to every view so a tab can receive replies to its own
+	// commands even while another tab is active.
 	var cmds []tea.Cmd
 	for _, t := range m.tabs {
 		if c := t.v.Update(msg); c != nil {
@@ -185,8 +185,6 @@ func (m *Model) renderHeader() string {
 	}
 	tabs := lipgloss.JoinHorizontal(lipgloss.Top, tabParts...)
 
-	// repoTag on the left, tabs in the middle. Right side stays empty for
-	// future status indicators (counts, errors).
 	gap := m.width - lipgloss.Width(repoTag) - lipgloss.Width(tabs)
 	if gap < 1 {
 		gap = 1

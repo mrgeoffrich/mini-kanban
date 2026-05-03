@@ -26,16 +26,24 @@ func ParseIssueKey(key string) (prefix string, number int64, err error) {
 	return strings.ToUpper(m[1]), n, nil
 }
 
+// CreateIssue is fully atomic: the counter peek, INSERT, tag writes, and
+// counter bump all live in a single transaction. We deliberately bump the
+// counter LAST (right before Commit) so that any failure in the issue or
+// tag inserts means the counter never even gets touched on disk — that
+// way a phantom-number gap requires a Commit to actually succeed, which
+// only happens when every preceding step succeeded.
 func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description string, state model.State, tags []string) (*model.Issue, error) {
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	num, err := s.AllocateIssueNumber(tx, repoID)
-	if err != nil {
+
+	var num int64
+	if err := tx.QueryRow(`SELECT next_issue_number FROM repos WHERE id = ?`, repoID).Scan(&num); err != nil {
 		return nil, err
 	}
+
 	res, err := tx.Exec(
 		`INSERT INTO issues (repo_id, number, feature_id, title, description, state) VALUES (?, ?, ?, ?, ?, ?)`,
 		repoID, num, nullableInt(featureID), title, description, string(state),
@@ -45,6 +53,10 @@ func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description s
 	}
 	id, _ := res.LastInsertId()
 	if err := s.addTagsTx(tx, id, tags); err != nil {
+		return nil, err
+	}
+
+	if _, err := tx.Exec(`UPDATE repos SET next_issue_number = next_issue_number + 1 WHERE id = ?`, repoID); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {

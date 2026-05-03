@@ -93,8 +93,8 @@ func (d *docsView) refreshSelection() {
 	d.overlayScroll = 0
 }
 
-func (d *docsView) Init() tea.Cmd  { return nil }
-func (d *docsView) Status() string { return "" }
+func (d *docsView) Init() tea.Cmd    { return nil }
+func (d *docsView) Status() string   { return "" }
 func (d *docsView) HasOverlay() bool { return d.overlay }
 
 func (d *docsView) Help() string {

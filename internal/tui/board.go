@@ -36,6 +36,7 @@ type boardView struct {
 	columns       map[model.State][]*model.Issue
 	col           int
 	rows          map[model.State]int
+	scroll        map[model.State]int // top visible card index per column
 	detailVisible bool
 
 	selected    *model.Issue
@@ -65,6 +66,7 @@ func newBoardView(s *store.Store, repo *model.Repo) (*boardView, error) {
 		hidden:        hidden,
 		columns:       map[model.State][]*model.Issue{},
 		rows:          map[model.State]int{},
+		scroll:        map[model.State]int{},
 		detailVisible: true,
 	}
 	if err := b.reload(); err != nil {
@@ -492,43 +494,78 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 		innerWidth = 4
 	}
 
+	// Each card occupies exactly cardHeight lines: the first carries the
+	// issue key and the start of the title, subsequent lines are wrapped
+	// title continuations indented to align under the title text.
+	const cardHeight = 2
+	const headerRows = 1
+
+	// Compute how many cards fit in the body, then nudge the per-column
+	// scroll so the cursor stays in view.
+	bodyRows := height - 2 - headerRows // -2 for top/bottom borders
+	if bodyRows < cardHeight {
+		bodyRows = cardHeight
+	}
+	cardsPerCol := bodyRows / cardHeight
+	if cardsPerCol < 1 {
+		cardsPerCol = 1
+	}
+	scroll := b.scroll[st]
+	if scroll > sel {
+		scroll = sel
+	}
+	if sel >= scroll+cardsPerCol {
+		scroll = sel - cardsPerCol + 1
+	}
+	maxScroll := len(issues) - cardsPerCol
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if scroll > maxScroll {
+		scroll = maxScroll
+	}
+	if scroll < 0 {
+		scroll = 0
+	}
+	b.scroll[st] = scroll
+
+	end := scroll + cardsPerCol
+	if end > len(issues) {
+		end = len(issues)
+	}
+	moreAbove := scroll > 0
+	moreBelow := end < len(issues)
+
+	indicator := ""
+	switch {
+	case moreAbove && moreBelow:
+		indicator = " ↕"
+	case moreAbove:
+		indicator = " ↑"
+	case moreBelow:
+		indicator = " ↓"
+	}
+
 	header := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("231")).
 		Background(headerBG).
 		Width(innerWidth).
 		Align(lipgloss.Center).
-		Render(fmt.Sprintf("%s · %d", stateLabel(st), len(issues)))
+		Render(fmt.Sprintf("%s · %d%s", stateLabel(st), len(issues), indicator))
 
 	cardStyle := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1)
 	selStyle := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
 		Background(cardSelectedBG).Foreground(lipgloss.Color("231"))
 
-	// Each card occupies exactly cardHeight lines: the first carries the
-	// issue key and the start of the title, subsequent lines are wrapped
-	// title continuations indented to align under the title text.
-	const cardHeight = 2
-
 	var lines []string
 	if len(issues) == 0 {
 		lines = append(lines, mutedStyle.Width(innerWidth).Padding(1, 1).Render("— empty —"))
 	}
-	for i, iss := range issues {
+	for i := scroll; i < end; i++ {
+		iss := issues[i]
 		bracketed := "[" + iss.Key + "]"
-		prefixW := len(bracketed) + 2 // [KEY] + two-space gutter on line 0 only
-		// Line 0 shares its row with the issue key, so it has less title room
-		// than wrap-around lines, which start at the left edge.
-		firstW := innerWidth - 2 - prefixW
 		fullW := innerWidth - 2
-		if firstW < 4 {
-			firstW = 4
-		}
-		titleLines := wrapLinesAt(iss.Title, func(line int) int {
-			if line == 0 {
-				return firstW
-			}
-			return fullW
-		}, cardHeight)
 
 		isSel := i == sel && focused
 		styler := cardStyle
@@ -542,6 +579,31 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 			styler = selStyle
 			keyRender = bracketed
 		}
+
+		// If the title fits on a single line at the full inner width, use
+		// the spacious layout: [KEY] alone on line 0, title alone on line
+		// 1. This avoids the line-0 prefix gutter eating into the title's
+		// budget for the common short-title case.
+		if titleRunes := []rune(iss.Title); len(titleRunes) <= fullW {
+			lines = append(lines, styler.Render(keyRender))
+			lines = append(lines, styler.Render(iss.Title))
+			continue
+		}
+
+		// Title needs both lines. Pack [KEY] + the start of the title on
+		// line 0, then the continuation on line 1.
+		prefixW := len(bracketed) + 2 // [KEY] + two-space gutter
+		firstW := innerWidth - 2 - prefixW
+		if firstW < 4 {
+			firstW = 4
+		}
+		titleLines := wrapLinesAt(iss.Title, func(line int) int {
+			if line == 0 {
+				return firstW
+			}
+			return fullW
+		}, cardHeight)
+
 		for j := 0; j < cardHeight; j++ {
 			var content string
 			switch {
@@ -583,7 +645,7 @@ func (b *boardView) renderDetail(width, height int) string {
 
 	box := lipgloss.NewStyle().
 		Border(colBorder).
-		BorderForeground(colFocusBorder).
+		BorderForeground(colBorderColor).
 		Width(width - 2).
 		Height(height - 2).
 		Padding(0, 1)
@@ -625,11 +687,11 @@ func (b *boardView) renderDetail(width, height int) string {
 	if descRows < 1 {
 		descRows = 1
 	}
-	desc := iss.Description
-	if desc == "" {
+	var desc string
+	if iss.Description == "" {
 		desc = mutedStyle.Italic(true).Render("(no description — enter for full view)")
 	} else {
-		desc = lipgloss.NewStyle().Width(innerWidth).Render(desc)
+		desc = renderMarkdown(iss.Description, innerWidth)
 		desc = clipLines(desc, descRows)
 	}
 

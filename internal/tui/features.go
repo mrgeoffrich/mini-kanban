@@ -88,8 +88,8 @@ func (f *featuresView) refreshSelection() {
 	f.overlayScroll = 0
 }
 
-func (f *featuresView) Init() tea.Cmd  { return nil }
-func (f *featuresView) Status() string { return "" }
+func (f *featuresView) Init() tea.Cmd    { return nil }
+func (f *featuresView) Status() string   { return "" }
 func (f *featuresView) HasOverlay() bool { return f.overlay }
 
 func (f *featuresView) Help() string {

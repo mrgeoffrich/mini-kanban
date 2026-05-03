@@ -87,7 +87,13 @@ func docAddCmd() *cobra.Command {
 				TargetID: &d.ID, TargetLabel: d.Filename,
 				Details: "type=" + string(d.Type),
 			})
-			return emit(d)
+			// JSON consumers (AI agents, scripts) want the full document
+			// object. Text consumers want a clear success line.
+			if opts.output == outputJSON {
+				return emit(d)
+			}
+			return ok("Created %s in %s (type=%s, %d bytes)",
+				d.Filename, repo.Prefix, d.Type, d.SizeBytes)
 		},
 	}
 	cmd.Flags().StringVar(&typeStr, "type", "", "document type (e.g. architecture, designs, user-docs)")
