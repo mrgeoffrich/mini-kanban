@@ -44,7 +44,8 @@ func parseLookback(s string) (time.Duration, error) {
 // timezone; RFC 3339 inputs honour the offset they specify.
 //
 // Accepted: 2006-01-02 | 2006-01-02 15:04 | 2006-01-02 15:04:05 |
-//           2006-01-02T15:04:05 | RFC3339 (e.g. 2026-05-03T07:27:14Z).
+//
+//	2006-01-02T15:04:05 | RFC3339 (e.g. 2026-05-03T07:27:14Z).
 func parseTimestamp(s string) (time.Time, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {

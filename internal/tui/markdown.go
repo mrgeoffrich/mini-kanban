@@ -15,8 +15,8 @@ import (
 // Falls back to raw markdown on any error — formatting is decorative.
 
 var (
-	mdRenderers   sync.Map // int width → *glamour.TermRenderer
-	mdMinWidth    = 20
+	mdRenderers sync.Map // int width → *glamour.TermRenderer
+	mdMinWidth  = 20
 )
 
 func mdRenderer(width int) *glamour.TermRenderer {

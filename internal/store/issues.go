@@ -66,7 +66,7 @@ func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description s
 }
 
 func (s *Store) GetIssueByID(id int64) (*model.Issue, error) {
-	iss, err := scanIssue(s.DB.QueryRow(issueSelect + ` WHERE i.id = ?`, id))
+	iss, err := scanIssue(s.DB.QueryRow(issueSelect+` WHERE i.id = ?`, id))
 	if err != nil {
 		return nil, err
 	}

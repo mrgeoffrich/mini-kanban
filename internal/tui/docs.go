@@ -285,7 +285,7 @@ func (d *docsView) renderPreview(width, height int) string {
 
 	box := lipgloss.NewStyle().
 		Border(colBorder).BorderForeground(colBorderColor).
-		Width(width - 2).Height(height - 2).Padding(0, 1)
+		Width(width-2).Height(height-2).Padding(0, 1)
 
 	if d.err != nil {
 		return box.Render(errorStyle.Render(d.err.Error()))
@@ -330,7 +330,7 @@ func (d *docsView) viewOverlay(width, height int) string {
 	if d.loaded == nil {
 		return lipgloss.NewStyle().
 			Border(colBorder).BorderForeground(colFocusBorder).
-			Width(width - 2).Height(height - 2).Padding(1, 2).
+			Width(width-2).Height(height-2).Padding(1, 2).
 			Render("No document selected.")
 	}
 
@@ -379,7 +379,7 @@ func (d *docsView) viewOverlay(width, height int) string {
 
 	return lipgloss.NewStyle().
 		Border(colBorder).BorderForeground(colFocusBorder).
-		Width(width - 2).Padding(1, 2).
+		Width(width-2).Padding(1, 2).
 		Render(combined)
 }
 

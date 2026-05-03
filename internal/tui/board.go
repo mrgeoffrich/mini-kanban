@@ -50,12 +50,12 @@ type boardView struct {
 	scroll        map[model.State]int // top visible card index per column
 	detailVisible bool
 
-	selected     *model.Issue
-	comments     []*model.Comment
-	commentsErr  error
-	docLinks     []*model.DocumentLink
-	prs          []*model.PullRequest
-	attachErr    error
+	selected    *model.Issue
+	comments    []*model.Comment
+	commentsErr error
+	docLinks    []*model.DocumentLink
+	prs         []*model.PullRequest
+	attachErr   error
 
 	overlay       bool
 	overlayFocus  overlayPane // which sub-pane has focus inside the card overlay
@@ -783,8 +783,8 @@ func (b *boardView) renderDetail(width, height int) string {
 	box := lipgloss.NewStyle().
 		Border(colBorder).
 		BorderForeground(colBorderColor).
-		Width(width - 2).
-		Height(height - 2).
+		Width(width-2).
+		Height(height-2).
 		Padding(0, 1)
 
 	if b.selected == nil {
@@ -874,7 +874,7 @@ func (b *boardView) viewOverlay(width, height int) string {
 	if iss == nil {
 		return lipgloss.NewStyle().
 			Border(colBorder).BorderForeground(colFocusBorder).
-			Width(width - 2).Height(height - 2).Padding(1, 2).
+			Width(width-2).Height(height-2).Padding(1, 2).
 			Render("No issue selected.")
 	}
 
@@ -907,7 +907,7 @@ func (b *boardView) viewOverlay(width, height int) string {
 	return lipgloss.NewStyle().
 		Border(colBorder).
 		BorderForeground(colFocusBorder).
-		Width(width - 2).
+		Width(width-2).
 		Padding(1, 2).
 		Render(body)
 }

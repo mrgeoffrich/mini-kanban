@@ -54,11 +54,11 @@ const (
 )
 
 type Relation struct {
-	ID         int64        `json:"id"`
-	FromIssue  string       `json:"from_issue"` // key form
-	ToIssue    string       `json:"to_issue"`
-	Type       RelationType `json:"type"`
-	CreatedAt  time.Time    `json:"created_at"`
+	ID        int64        `json:"id"`
+	FromIssue string       `json:"from_issue"` // key form
+	ToIssue   string       `json:"to_issue"`
+	Type      RelationType `json:"type"`
+	CreatedAt time.Time    `json:"created_at"`
 }
 
 type PullRequest struct {
@@ -67,4 +67,3 @@ type PullRequest struct {
 	URL       string    `json:"url"`
 	CreatedAt time.Time `json:"created_at"`
 }
-

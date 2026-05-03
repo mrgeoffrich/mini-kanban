@@ -141,11 +141,11 @@ func (h *historyView) View(width, height int) string {
 	// Auto-size widths from the visible entries (with sensible caps so a
 	// runaway long actor/op doesn't squeeze the details column to nothing).
 	const (
-		whenW    = 12
-		actorMin = 6
-		actorCap = 16
-		opMin    = 6
-		opCap    = 22
+		whenW     = 12
+		actorMin  = 6
+		actorCap  = 16
+		opMin     = 6
+		opCap     = 22
 		targetMin = 6
 		targetCap = 14
 	)
@@ -181,7 +181,7 @@ func (h *historyView) View(width, height int) string {
 	// Layout: " when │ actor │ op │ target │ details ". Each cell carries 1
 	// column of left+right padding inside the separators.
 	const sep = "│"
-	cellPad := 2 // 1 left + 1 right
+	cellPad := 2                                                                     // 1 left + 1 right
 	fixedW := whenW + actorW + opW + targetW + 4*cellPad + 4*lipgloss.Width(sep) + 1 // leading separator? we use leading space instead
 	detailsW := innerWidth - fixedW
 	if detailsW < 8 {

@@ -270,7 +270,7 @@ func (f *featuresView) renderDetail(width, height int) string {
 
 	box := lipgloss.NewStyle().
 		Border(colBorder).BorderForeground(colBorderColor).
-		Width(width - 2).Height(height - 2).Padding(0, 1)
+		Width(width-2).Height(height-2).Padding(0, 1)
 
 	if f.err != nil {
 		return box.Render(errorStyle.Render(f.err.Error()))
@@ -354,7 +354,7 @@ func (f *featuresView) viewOverlay(width, height int) string {
 	if f.selected == nil {
 		return lipgloss.NewStyle().
 			Border(colBorder).BorderForeground(colFocusBorder).
-			Width(width - 2).Height(height - 2).Padding(1, 2).
+			Width(width-2).Height(height-2).Padding(1, 2).
 			Render("No feature selected.")
 	}
 
@@ -420,6 +420,6 @@ func (f *featuresView) viewOverlay(width, height int) string {
 
 	return lipgloss.NewStyle().
 		Border(colBorder).BorderForeground(colFocusBorder).
-		Width(width - 2).Padding(1, 2).
+		Width(width-2).Padding(1, 2).
 		Render(combined)
 }
