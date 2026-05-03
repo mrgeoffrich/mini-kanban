@@ -199,6 +199,79 @@ func (s *Store) SetIssueState(id int64, state model.State) error {
 	return err
 }
 
+// SetIssueAssignee writes the assignee field. An empty string clears it.
+func (s *Store) SetIssueAssignee(id int64, assignee string) error {
+	_, err := s.DB.Exec(`UPDATE issues SET assignee = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, assignee, id)
+	return err
+}
+
+// ClaimNextIssue atomically picks the next ready issue in a feature and flips
+// it to in_progress with the given assignee. "Ready" means: state='todo',
+// assignee='', and every `blocks`-blocker is in a terminal state
+// (done/cancelled/duplicate). Returns nil, nil when nothing is currently
+// claimable (the caller should treat this as "wait and retry"). The picked
+// row is the lowest-numbered candidate, matching the order produced by
+// `feature plan`.
+//
+// Concurrency: the SELECT + UPDATE run inside a single transaction, and the
+// UPDATE re-asserts the claim predicates so a concurrent claimer that
+// commits first causes our UPDATE to affect zero rows (treated as
+// "nothing claimable, try again").
+func (s *Store) ClaimNextIssue(repoID int64, featureID int64, assignee string) (*model.Issue, error) {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	const candidateQ = `
+		SELECT i.id
+		FROM issues i
+		WHERE i.repo_id = ?
+		  AND i.feature_id = ?
+		  AND i.state = 'todo'
+		  AND i.assignee = ''
+		  AND NOT EXISTS (
+		    SELECT 1
+		    FROM issue_relations ir
+		    JOIN issues b ON b.id = ir.from_issue_id
+		    WHERE ir.type = 'blocks'
+		      AND ir.to_issue_id = i.id
+		      AND b.state NOT IN ('done','cancelled','duplicate')
+		  )
+		ORDER BY i.number
+		LIMIT 1`
+
+	var id int64
+	err = tx.QueryRow(candidateQ, repoID, featureID).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := tx.Exec(`
+		UPDATE issues
+		SET state = 'in_progress', assignee = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND state = 'todo' AND assignee = ''`, assignee, id)
+	if err != nil {
+		return nil, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		// Lost the race with another claimer; caller can retry.
+		return nil, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.GetIssueByID(id)
+}
+
 func (s *Store) DeleteIssue(id int64) error {
 	_, err := s.DB.Exec(`DELETE FROM issues WHERE id = ?`, id)
 	return err
@@ -240,7 +313,7 @@ func (s *Store) CountFeatures(repoID int64) (int, error) {
 
 const issueSelect = `
 SELECT i.id, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slug, ''),
-       i.title, i.description, i.state, i.created_at, i.updated_at
+       i.title, i.description, i.state, i.assignee, i.created_at, i.updated_at
 FROM issues i
 JOIN repos r ON r.id = i.repo_id
 LEFT JOIN features f ON f.id = i.feature_id`
@@ -254,7 +327,7 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 		state     string
 	)
 	err := row.Scan(&i.ID, &i.RepoID, &i.Number, &prefix, &featureID, &featSlug,
-		&i.Title, &i.Description, &state, &i.CreatedAt, &i.UpdatedAt)
+		&i.Title, &i.Description, &state, &i.Assignee, &i.CreatedAt, &i.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

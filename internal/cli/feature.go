@@ -11,7 +11,7 @@ import (
 
 func newFeatureCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "feature", Short: "Manage features (groups of issues)"}
-	cmd.AddCommand(featureAddCmd(), featureListCmd(), featureShowCmd(), featureEditCmd(), featureRmCmd())
+	cmd.AddCommand(featureAddCmd(), featureListCmd(), featureShowCmd(), featureEditCmd(), featureRmCmd(), featurePlanCmd())
 	return cmd
 }
 

@@ -97,6 +97,18 @@ func migrate(db *sql.DB) error {
 			return err
 		}
 	}
+	hasAssignee, err := columnExists(db, "issues", "assignee")
+	if err != nil {
+		return err
+	}
+	if !hasAssignee {
+		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN assignee TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_issues_assignee ON issues(assignee)`); err != nil {
+		return err
+	}
 	return nil
 }
 

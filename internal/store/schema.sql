@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS issues (
     description TEXT    NOT NULL DEFAULT '',
     state       TEXT    NOT NULL CHECK (state IN
                   ('backlog','todo','in_progress','in_review','done','cancelled','duplicate')),
+    assignee    TEXT    NOT NULL DEFAULT '',
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(repo_id, number)
@@ -35,6 +36,9 @@ CREATE TABLE IF NOT EXISTS issues (
 
 CREATE INDEX IF NOT EXISTS idx_issues_state ON issues(state);
 CREATE INDEX IF NOT EXISTS idx_issues_feature ON issues(feature_id);
+-- idx_issues_assignee is created in migrate() so it works on databases that
+-- pre-date the assignee column. The ALTER ADD COLUMN must run before the
+-- index can reference it.
 
 CREATE TABLE IF NOT EXISTS comments (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,

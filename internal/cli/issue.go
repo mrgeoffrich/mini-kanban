@@ -21,6 +21,9 @@ func newIssueCmd() *cobra.Command {
 		issueBriefCmd(),
 		issueEditCmd(),
 		issueStateCmd(),
+		issueAssignCmd(),
+		issueUnassignCmd(),
+		issueNextCmd(),
 		issueRmCmd(),
 	)
 	return cmd
@@ -506,6 +509,147 @@ func collectBriefDocs(s *store.Store, issueID int64, feat *model.Feature, includ
 	}
 
 	return out, warnings, nil
+}
+
+func issueAssignCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "assign <KEY> <name>",
+		Short: "Assign an issue to a person or agent",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name := strings.TrimSpace(args[1])
+			if name == "" {
+				return fmt.Errorf("assignee name must be non-empty (use `mk issue unassign` to clear)")
+			}
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+			iss, err := resolveIssueByKey(s, args[0])
+			if err != nil {
+				return err
+			}
+			old := iss.Assignee
+			if err := s.SetIssueAssignee(iss.ID, name); err != nil {
+				return err
+			}
+			updated, err := s.GetIssueByID(iss.ID)
+			if err != nil {
+				return err
+			}
+			details := "assigned to " + name
+			if old != "" {
+				details = fmt.Sprintf("%s → %s", old, name)
+			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &iss.RepoID,
+				Op:     "issue.assign", Kind: "issue",
+				TargetID: &updated.ID, TargetLabel: updated.Key,
+				Details: details,
+			})
+			return emit(updated)
+		},
+	}
+}
+
+func issueUnassignCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "unassign <KEY>",
+		Short: "Clear the assignee on an issue",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+			iss, err := resolveIssueByKey(s, args[0])
+			if err != nil {
+				return err
+			}
+			if iss.Assignee == "" {
+				return emit(iss)
+			}
+			old := iss.Assignee
+			if err := s.SetIssueAssignee(iss.ID, ""); err != nil {
+				return err
+			}
+			updated, err := s.GetIssueByID(iss.ID)
+			if err != nil {
+				return err
+			}
+			recordOp(s, model.HistoryEntry{
+				RepoID: &iss.RepoID,
+				Op:     "issue.assign", Kind: "issue",
+				TargetID: &updated.ID, TargetLabel: updated.Key,
+				Details: fmt.Sprintf("%s → (unassigned)", old),
+			})
+			return emit(updated)
+		},
+	}
+}
+
+// claimResult is the structured payload `mk issue next` emits. Issue is nil
+// when no work is currently claimable (so JSON consumers see {"issue": null}
+// and can poll without parsing errors).
+type claimResult struct {
+	Issue *model.Issue `json:"issue"`
+}
+
+func issueNextCmd() *cobra.Command {
+	var featureSlug string
+	cmd := &cobra.Command{
+		Use:   "next",
+		Short: "Atomically claim the next ready issue in a feature",
+		Long: `Picks the lowest-numbered todo issue in --feature whose blockers are all
+done/cancelled/duplicate and whose assignee is empty, flips it to
+in_progress, and stamps the assignee with --user.
+
+Designed for agent loops: call repeatedly to walk through a feature in
+dependency order. When nothing is currently claimable (everything is
+either claimed, done, or still blocked) the command emits an empty
+result with exit code 0 — the caller should wait and retry rather than
+treat it as an error.
+
+Pass --user explicitly so the audit log and assignee reflect the agent's
+identity instead of the OS username.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if featureSlug == "" {
+				return fmt.Errorf("--feature is required")
+			}
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+			repo, err := resolveRepo(s)
+			if err != nil {
+				return err
+			}
+			feat, err := s.GetFeatureBySlug(repo.ID, featureSlug)
+			if err != nil {
+				return fmt.Errorf("feature %q: %w", featureSlug, err)
+			}
+			who := actor()
+			iss, err := s.ClaimNextIssue(repo.ID, feat.ID, who)
+			if err != nil {
+				return err
+			}
+			if iss != nil {
+				recordOp(s, model.HistoryEntry{
+					RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+					Op: "issue.claim", Kind: "issue",
+					TargetID: &iss.ID, TargetLabel: iss.Key,
+					Details: fmt.Sprintf("claimed by %s (todo → in_progress)", who),
+				})
+			}
+			return emit(&claimResult{Issue: iss})
+		},
+	}
+	cmd.Flags().StringVarP(&featureSlug, "feature", "f", "", "feature slug to pull from (required)")
+	return cmd
 }
 
 func issueRmCmd() *cobra.Command {

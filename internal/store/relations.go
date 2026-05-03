@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 )
@@ -95,3 +96,54 @@ func scanRelations(rows *sql.Rows) ([]model.Relation, error) {
 
 // Sentinel for callers that want to differentiate "not found" deletions.
 var ErrNoRelation = errors.New("no relation between issues")
+
+// IssueBlocker describes one `blocks` edge pointing AT a given blocked issue,
+// with enough info about the blocker (key + state) for callers to render
+// dependency hints without N+1 lookups.
+type IssueBlocker struct {
+	BlockedID    int64
+	BlockerID    int64
+	BlockerKey   string
+	BlockerState model.State
+}
+
+// BlockersFor returns, keyed by blocked-issue id, every `blocks` edge whose
+// "to" side (the blocked issue) is in the given id set. Blockers may live in
+// any repo / feature — callers decide how to interpret cross-feature blockers.
+func (s *Store) BlockersFor(ids []int64) (map[int64][]IssueBlocker, error) {
+	out := map[int64][]IssueBlocker{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	ph := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		ph[i] = "?"
+		args[i] = id
+	}
+	q := fmt.Sprintf(`
+		SELECT ir.to_issue_id,
+		       ir.from_issue_id,
+		       r.prefix || '-' || src.number AS blocker_key,
+		       src.state
+		FROM issue_relations ir
+		JOIN issues src ON src.id = ir.from_issue_id
+		JOIN repos  r   ON r.id   = src.repo_id
+		WHERE ir.type = 'blocks'
+		  AND ir.to_issue_id IN (%s)`, strings.Join(ph, ","))
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var b IssueBlocker
+		var st string
+		if err := rows.Scan(&b.BlockedID, &b.BlockerID, &b.BlockerKey, &st); err != nil {
+			return nil, fmt.Errorf("scan blocker: %w", err)
+		}
+		b.BlockerState = model.State(st)
+		out[b.BlockedID] = append(out[b.BlockedID], b)
+	}
+	return out, rows.Err()
+}

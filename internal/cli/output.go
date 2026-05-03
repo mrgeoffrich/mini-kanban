@@ -93,6 +93,10 @@ func renderText(w io.Writer, v any) error {
 		return printDocView(w, x)
 	case *store.IssueRelations:
 		printRelations(w, x)
+	case *planView:
+		printPlan(w, x)
+	case *claimResult:
+		printClaim(w, x)
 	case []*model.HistoryEntry:
 		for _, e := range x {
 			printHistoryLine(w, e)
@@ -122,6 +126,9 @@ func printIssue(w io.Writer, i *model.Issue) error {
 	fmt.Fprintf(w, "State:    %s\n", i.State)
 	if i.FeatureSlug != "" {
 		fmt.Fprintf(w, "Feature:  %s\n", i.FeatureSlug)
+	}
+	if i.Assignee != "" {
+		fmt.Fprintf(w, "Assignee: %s\n", i.Assignee)
 	}
 	if len(i.Tags) > 0 {
 		fmt.Fprintf(w, "Tags:     %s\n", strings.Join(i.Tags, ", "))
@@ -259,6 +266,36 @@ func printDocLinkLine(w io.Writer, l *model.DocumentLink) {
 		fmt.Fprintf(w, "  %s — %s\n", target, l.Description)
 	} else {
 		fmt.Fprintf(w, "  %s\n", target)
+	}
+}
+
+func printPlan(w io.Writer, p *planView) {
+	if len(p.Order) == 0 {
+		fmt.Fprintf(w, "feature %s has no open issues\n", p.Feature)
+		return
+	}
+	fmt.Fprintf(w, "Plan for feature %s (%d open issues):\n", p.Feature, len(p.Order))
+	for i, e := range p.Order {
+		line := fmt.Sprintf("  %2d. %-10s %-12s %s", i+1, e.Key, e.State, e.Title)
+		if e.Assignee != "" {
+			line += "  (@" + e.Assignee + ")"
+		}
+		if len(e.BlockedBy) > 0 {
+			line += "  [blocked by: " + strings.Join(e.BlockedBy, ", ") + "]"
+		}
+		fmt.Fprintln(w, line)
+	}
+}
+
+func printClaim(w io.Writer, c *claimResult) {
+	if c.Issue == nil {
+		fmt.Fprintln(w, "no claimable work right now (everything is claimed, done, or still blocked)")
+		return
+	}
+	fmt.Fprintf(w, "claimed %s by %s\n", c.Issue.Key, c.Issue.Assignee)
+	fmt.Fprintf(w, "%s\n", c.Issue.Title)
+	if c.Issue.Description != "" {
+		fmt.Fprintf(w, "\n%s\n", c.Issue.Description)
 	}
 }
 

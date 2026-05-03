@@ -78,6 +78,17 @@ mk feature edit <slug>               Patch fields (pass --title and/or --descrip
   --description <text|->
   --description-file <path>
 mk feature rm <slug>                 Delete a feature (issues remain, but lose their feature link)
+mk feature plan <slug>               Print open issues in execution order,
+                                     respecting `blocks` dependencies. Issues
+                                     with all blockers satisfied appear first;
+                                     blocked issues appear after their
+                                     blockers, annotated with `blocked_by`.
+                                     Open = not done/cancelled/duplicate.
+                                     Cross-feature blockers are surfaced as
+                                     `blocked_by` hints but don't gate the
+                                     topo position. Errors out on a cycle.
+                                     Use `-o json` to drive an agent through
+                                     the order one issue at a time.
 ```
 
 **Example:**
@@ -119,6 +130,21 @@ mk issue edit <KEY>
   -f, --feature <slug>                  Move to a feature
   --no-feature                          Detach from any feature
 mk issue state <KEY> <state>         Change state (accepts dashes/spaces)
+mk issue assign <KEY> <name>         Set the assignee (free-form name; pass
+                                     an agent identity when a bot picks
+                                     up the work)
+mk issue unassign <KEY>              Clear the assignee
+mk issue next --feature <slug>       Atomically claim the next ready issue
+                                     in a feature: lowest-numbered todo
+                                     issue with all blockers
+                                     done/cancelled/duplicate and no
+                                     existing assignee. Flips it to
+                                     in_progress and stamps the assignee
+                                     with --user. Emits
+                                     `{"issue": null}` (and exit 0) when
+                                     nothing is currently claimable —
+                                     callers should poll/retry rather
+                                     than treat that as an error.
 mk issue rm <KEY>                    Delete an issue (cascades to comments,
                                      relations, PRs, tags, doc links)
 ```
@@ -139,6 +165,24 @@ mk issue brief MINI-42 | tee /tmp/ctx.json
 ```
 
 `mk issue brief` returns a single object: `{issue, feature?, relations, pull_requests, documents, comments, warnings}`. Each entry in `documents` carries `filename`, `type`, `description` (the link's `--why`), `linked_via` (one or both of `"issue"` and `"feature/<slug>"`), `source_path`, and `content`. Docs reachable from both the issue and its parent feature are deduped to a single entry whose `linked_via` lists both paths. If the issue and feature link rows have differing `--why` descriptions, the issue's wins and a string is appended to `warnings`.
+
+**Driving an agent through a feature in dependency order.** Use `mk feature plan <slug>` to inspect the topo order, then loop on `mk issue next --feature <slug> --user <agent>` to claim issues one at a time:
+
+```bash
+# Read the plan once to understand what's ahead
+mk feature plan service-addons-framework
+
+# Agent loop: claim → work → mark done → repeat
+while :; do
+  next=$(mk issue next --feature service-addons-framework --user agent-1 -o json)
+  key=$(jq -r '.issue.key // empty' <<<"$next")
+  if [ -z "$key" ]; then sleep 30; continue; fi
+  # ... agent does the work ...
+  mk issue state "$key" done --user agent-1
+done
+```
+
+Two agents can call `mk issue next` against the same feature in parallel; the SQLite writer lock plus a conditional UPDATE serialise claims, so each issue is handed to exactly one agent. When the DAG is currently serial (everything else blocked) the second agent simply gets `{"issue": null}` and should retry later. Crashed agents leave a stale `in_progress`/assigned issue — clear with `mk issue state <KEY> todo --user <human>` and `mk issue unassign <KEY>` to release it.
 
 ### Comments
 
@@ -198,7 +242,7 @@ mk history                           Last 50 mutations in the current repo
 
 `--from` / `--to` accept either local-time stamps (`YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, `YYYY-MM-DD HH:MM:SS`) or RFC 3339 (e.g. `2026-05-03T07:27:14Z`). Bare dates start at 00:00 in the local timezone.
 
-Op naming is dotted: `repo.create`, `feature.{create,update,delete}`, `issue.{create,update,state,delete}`, `comment.add`, `relation.{create,delete}`, `pr.{attach,detach}`, `tag.{add,remove}`, `document.{create,update,rename,delete,link,unlink}` (`mk doc upsert` records `document.create` or `document.update` depending on whether it created the row). Filtering by op prefix is not currently supported — match exactly, or use `--kind` for an entity-level cut.
+Op naming is dotted: `repo.create`, `feature.{create,update,delete}`, `issue.{create,update,state,assign,claim,delete}`, `comment.add`, `relation.{create,delete}`, `pr.{attach,detach}`, `tag.{add,remove}`, `document.{create,update,rename,delete,link,unlink}` (`mk doc upsert` records `document.create` or `document.update` depending on whether it created the row). Filtering by op prefix is not currently supported — match exactly, or use `--kind` for an entity-level cut.
 
 **Examples:**
 ```bash
