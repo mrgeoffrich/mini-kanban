@@ -143,6 +143,19 @@ func totalLines(s string) int {
 	return strings.Count(s, "\n") + 1
 }
 
+// indentLines prepends `prefix` to every line of s. Useful for nesting a
+// pre-rendered (and possibly multi-line) block under a heading.
+func indentLines(s, prefix string) string {
+	if s == "" {
+		return ""
+	}
+	parts := strings.Split(s, "\n")
+	for i, p := range parts {
+		parts[i] = prefix + p
+	}
+	return strings.Join(parts, "\n")
+}
+
 func oneLine(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", " ")
 	s = strings.ReplaceAll(s, "\n", " ")

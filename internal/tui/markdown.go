@@ -1,0 +1,59 @@
+package tui
+
+import (
+	"strings"
+	"sync"
+
+	"github.com/charmbracelet/glamour"
+)
+
+// Markdown rendering for fullscreen overlays. The renderer is the slow part
+// (it builds a chroma lexer + style at construction time), so we keep one
+// per terminal width and reuse it across calls. The expectation is that
+// `width` only changes on terminal resize, so the map stays small.
+//
+// Falls back to raw markdown on any error — formatting is decorative.
+
+var (
+	mdRenderers   sync.Map // int width → *glamour.TermRenderer
+	mdMinWidth    = 20
+)
+
+func mdRenderer(width int) *glamour.TermRenderer {
+	if width < mdMinWidth {
+		width = mdMinWidth
+	}
+	if v, ok := mdRenderers.Load(width); ok {
+		return v.(*glamour.TermRenderer)
+	}
+	r, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(), // dark/light from terminal
+		glamour.WithWordWrap(width),
+	)
+	if err != nil {
+		return nil
+	}
+	mdRenderers.Store(width, r)
+	return r
+}
+
+// renderMarkdown returns a styled rendering of `md` sized to `width`. On
+// error or empty input it returns a sensible fallback rather than panicking
+// — markdown formatting in this TUI is purely decorative.
+func renderMarkdown(md string, width int) string {
+	md = strings.TrimSpace(md)
+	if md == "" {
+		return ""
+	}
+	r := mdRenderer(width)
+	if r == nil {
+		return md
+	}
+	out, err := r.Render(md)
+	if err != nil {
+		return md
+	}
+	// Glamour pads with leading + trailing newlines; strip both so the
+	// caller can compose blocks tightly.
+	return strings.Trim(out, "\n")
+}

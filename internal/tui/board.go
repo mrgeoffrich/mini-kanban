@@ -636,11 +636,11 @@ func (b *boardView) viewOverlay(width, height int) string {
 	)
 
 	descHeader := boldStyle.Render("Description")
-	desc := iss.Description
-	if desc == "" {
+	var desc string
+	if iss.Description == "" {
 		desc = mutedStyle.Italic(true).Render("(none)")
 	} else {
-		desc = lipgloss.NewStyle().Width(innerWidth).Render(desc)
+		desc = renderMarkdown(iss.Description, innerWidth)
 	}
 
 	var commentBlocks []string
@@ -652,7 +652,11 @@ func (b *boardView) viewOverlay(width, height int) string {
 	} else {
 		for _, c := range b.comments {
 			head := keyStyle.Render(c.Author) + mutedStyle.Render("  "+c.CreatedAt.Format("2006-01-02 15:04"))
-			body := lipgloss.NewStyle().Width(innerWidth).PaddingLeft(2).Render(c.Body)
+			// Comment bodies render through glamour at slightly indented
+			// width so threaded replies stay visually nested without
+			// glamour breaking on the leading padding.
+			body := renderMarkdown(c.Body, innerWidth-2)
+			body = indentLines(body, "  ")
 			commentBlocks = append(commentBlocks, head+"\n"+body)
 		}
 	}

@@ -199,14 +199,36 @@ func (f *featuresView) renderList(width, height int) string {
 	if len(f.features) == 0 {
 		lines = append(lines, mutedStyle.Padding(1, 1).Render("— no features —"))
 	}
+	// Each feature row spans 3 lines: slug, then up to 2 wrapped title
+	// lines. The same selection background paints all three so a focused
+	// feature reads as a single chunk.
+	const featureRows = 3
+	titleW := innerWidth - 2
+	if titleW < 4 {
+		titleW = 4
+	}
 	for i, feat := range f.features {
-		// One row per feature: slug · title, truncated to fit. Slug acts as
-		// the stable identifier so we lead with it.
-		line := truncate(feat.Slug+"  "+feat.Title, innerWidth-2)
-		if i == f.row {
-			lines = append(lines, selStyle.Render(line))
-		} else {
-			lines = append(lines, rowStyle.Render(line))
+		isSel := i == f.row
+		styler := rowStyle
+		// When selected we render the slug as plain text so lipgloss paints
+		// the row uniformly — same nested-style fix as the board cards.
+		slugRender := keyStyle.Render(feat.Slug)
+		if isSel {
+			styler = selStyle
+			slugRender = feat.Slug
+		}
+		titleLines := wrapLines(feat.Title, titleW, 2)
+		for j := 0; j < featureRows; j++ {
+			var content string
+			switch {
+			case j == 0:
+				content = slugRender
+			case j-1 < len(titleLines):
+				content = titleLines[j-1]
+			default:
+				content = ""
+			}
+			lines = append(lines, styler.Render(content))
 		}
 	}
 
@@ -325,11 +347,11 @@ func (f *featuresView) viewOverlay(width, height int) string {
 	))
 
 	descHeader := boldStyle.Render("Description")
-	desc := feat.Description
-	if desc == "" {
+	var desc string
+	if feat.Description == "" {
 		desc = mutedStyle.Italic(true).Render("(none)")
 	} else {
-		desc = lipgloss.NewStyle().Width(innerWidth).Render(desc)
+		desc = renderMarkdown(feat.Description, innerWidth)
 	}
 
 	issuesHeader := boldStyle.Render(fmt.Sprintf("Issues · %d", len(f.issues)))

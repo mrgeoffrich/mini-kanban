@@ -94,12 +94,12 @@ func (h *historyView) View(width, height int) string {
 		return ""
 	}
 	innerWidth := width - 2
-	if innerWidth < 20 {
-		innerWidth = 20
+	if innerWidth < 40 {
+		innerWidth = 40
 	}
 	innerHeight := height - 2
-	if innerHeight < 3 {
-		innerHeight = 3
+	if innerHeight < 5 {
+		innerHeight = 5
 	}
 
 	box := lipgloss.NewStyle().
@@ -113,12 +113,13 @@ func (h *historyView) View(width, height int) string {
 		return box.Render(mutedStyle.Padding(1, 2).Render("(no history yet)"))
 	}
 
-	header := lipgloss.NewStyle().
+	titleBar := lipgloss.NewStyle().
 		Bold(true).Foreground(lipgloss.Color("231")).Background(colHeaderFocus).
 		Width(innerWidth).Padding(0, 1).
 		Render(fmt.Sprintf("History · %d entries (newest first)", len(h.entries)))
 
-	rowsHeight := innerHeight - 1 // header
+	// Reserve rows: title bar (1) + column header (1) + horizontal rule (1).
+	rowsHeight := innerHeight - 3
 	if rowsHeight < 1 {
 		rowsHeight = 1
 	}
@@ -133,33 +134,87 @@ func (h *historyView) View(width, height int) string {
 	if h.scroll < 0 {
 		h.scroll = 0
 	}
-
-	// Column widths inside innerWidth (account for 2 chars padding + spaces):
-	// when, actor, op, target, details. Details flexes.
-	const padW = 2
-	whenW, actorW, opW, targetW := 16, 12, 18, 12
-	usable := innerWidth - padW - whenW - actorW - opW - targetW - 4 // 4 spaces between cols
-	if usable < 10 {
-		usable = 10
-	}
-
-	var rows []string
 	end := min(h.scroll+rowsHeight, len(h.entries))
+
+	// Auto-size widths from the visible entries (with sensible caps so a
+	// runaway long actor/op doesn't squeeze the details column to nothing).
+	const (
+		whenW    = 12
+		actorMin = 6
+		actorCap = 16
+		opMin    = 6
+		opCap    = 22
+		targetMin = 6
+		targetCap = 14
+	)
+	actorW, opW, targetW := actorMin, opMin, targetMin
 	for i := h.scroll; i < end; i++ {
 		e := h.entries[i]
-		when := keyStyle.Render(formatRelative(e.CreatedAt))
-		actor := truncate(e.Actor, actorW)
-		op := boldStyle.Render(truncate(e.Op, opW))
-		target := truncate(e.TargetLabel, targetW)
-		details := truncate(oneLine(e.Details), usable)
-		line := fmt.Sprintf(" %-*s %-*s %-*s %-*s %s",
-			whenW, when,
-			actorW, actor,
-			opW, op,
-			targetW, target,
-			details,
-		)
-		// Pad/truncate the rendered line to innerWidth so highlight fills.
+		if l := lipgloss.Width(e.Actor); l > actorW {
+			actorW = l
+		}
+		if l := lipgloss.Width(e.Op); l > opW {
+			opW = l
+		}
+		if l := lipgloss.Width(e.TargetLabel); l > targetW {
+			targetW = l
+		}
+	}
+	if actorW > actorCap {
+		actorW = actorCap
+	}
+	if opW > opCap {
+		opW = opCap
+	}
+	if targetW > targetCap {
+		targetW = targetCap
+	}
+
+	// Layout: " when │ actor │ op │ target │ details ". Each cell carries 1
+	// column of left+right padding inside the separators.
+	const sep = "│"
+	cellPad := 2 // 1 left + 1 right
+	fixedW := whenW + actorW + opW + targetW + 4*cellPad + 4*lipgloss.Width(sep) + 1 // leading separator? we use leading space instead
+	detailsW := innerWidth - fixedW
+	if detailsW < 8 {
+		detailsW = 8
+	}
+
+	cell := func(text string, w int) string {
+		t := truncate(text, w)
+		// Manual right-pad — using lipgloss.Width handles ANSI in pre-styled
+		// inputs, but here all inputs are plain text.
+		return " " + t + strings.Repeat(" ", w-lipgloss.Width(t)) + " "
+	}
+	headerCell := func(text string, w int) string {
+		return " " + boldStyle.Render(truncate(text, w)) +
+			strings.Repeat(" ", w-lipgloss.Width(truncate(text, w))) + " "
+	}
+
+	colHeader := headerCell("when", whenW) + sep +
+		headerCell("actor", actorW) + sep +
+		headerCell("op", opW) + sep +
+		headerCell("target", targetW) + sep +
+		headerCell("details", detailsW)
+
+	// Horizontal rule under the header — a `─` run with `┼` at each column
+	// boundary so the table has visible joints.
+	rule := strings.Repeat("─", whenW+cellPad) + "┼" +
+		strings.Repeat("─", actorW+cellPad) + "┼" +
+		strings.Repeat("─", opW+cellPad) + "┼" +
+		strings.Repeat("─", targetW+cellPad) + "┼" +
+		strings.Repeat("─", detailsW+cellPad)
+	rule = mutedStyle.Render(rule)
+
+	var rows []string
+	for i := h.scroll; i < end; i++ {
+		e := h.entries[i]
+		line := cell(formatRelative(e.CreatedAt), whenW) + sep +
+			cell(e.Actor, actorW) + sep +
+			cell(e.Op, opW) + sep +
+			cell(e.TargetLabel, targetW) + sep +
+			cell(oneLine(e.Details), detailsW)
+
 		styled := lipgloss.NewStyle().Width(innerWidth)
 		if i == h.row {
 			styled = styled.Background(cardSelectedBG).Foreground(lipgloss.Color("231"))
@@ -168,7 +223,7 @@ func (h *historyView) View(width, height int) string {
 	}
 
 	body := strings.Join(rows, "\n")
-	return box.Render(lipgloss.JoinVertical(lipgloss.Left, header, body))
+	return box.Render(lipgloss.JoinVertical(lipgloss.Left, titleBar, colHeader, rule, body))
 }
 
 // formatRelative returns short relatively-friendly timestamps. We render

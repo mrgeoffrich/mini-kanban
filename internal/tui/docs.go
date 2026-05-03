@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -43,6 +44,20 @@ func (d *docsView) reload() {
 		return
 	}
 	d.err = nil
+	// Group rendering uses a stable sort by (type-order, filename). Doing
+	// this here keeps d.row indexing simple — the same flat slice drives
+	// both nav and the grouped view.
+	typeOrder := map[model.DocumentType]int{}
+	for i, t := range model.AllDocumentTypes() {
+		typeOrder[t] = i
+	}
+	sort.SliceStable(docs, func(i, j int) bool {
+		ai, bi := typeOrder[docs[i].Type], typeOrder[docs[j].Type]
+		if ai != bi {
+			return ai < bi
+		}
+		return docs[i].Filename < docs[j].Filename
+	})
 	d.docs = docs
 	if d.row >= len(docs) {
 		d.row = max(0, len(docs)-1)
@@ -186,14 +201,23 @@ func (d *docsView) renderList(width, height int) string {
 	rowStyle := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1)
 	selStyle := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
 		Background(cardSelectedBG).Foreground(lipgloss.Color("231"))
+	groupStyle := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
+		Foreground(cardKeyColor).Bold(true)
 
 	var lines []string
 	if len(d.docs) == 0 {
 		lines = append(lines, mutedStyle.Padding(1, 1).Render("— no documents —"))
 	}
+	// Walk the (type-sorted) flat list and emit a group header whenever we
+	// cross a type boundary. Headers are non-selectable; d.row still indexes
+	// directly into d.docs so navigation stays simple.
+	var lastType model.DocumentType
 	for i, doc := range d.docs {
-		typeTag := mutedStyle.Render(shortDocType(doc.Type))
-		line := truncate(doc.Filename, innerWidth-len(shortDocType(doc.Type))-3) + "  " + typeTag
+		if i == 0 || doc.Type != lastType {
+			lines = append(lines, groupStyle.Render("▸ "+stringDocType(doc.Type)))
+			lastType = doc.Type
+		}
+		line := "  " + truncate(doc.Filename, innerWidth-4)
 		if i == d.row {
 			lines = append(lines, selStyle.Render(line))
 		} else {
@@ -273,7 +297,10 @@ func (d *docsView) viewOverlay(width, height int) string {
 		doc.CreatedAt.Format("2006-01-02 15:04"),
 		doc.UpdatedAt.Format("2006-01-02 15:04"),
 	))
-	body := lipgloss.NewStyle().Width(innerWidth).Render(doc.Content)
+	body := renderMarkdown(doc.Content, innerWidth)
+	if body == "" {
+		body = mutedStyle.Italic(true).Render("(empty)")
+	}
 
 	full := strings.Join([]string{title, meta, "", body}, "\n")
 	innerHeight := height - 2 - 2
@@ -303,6 +330,31 @@ func (d *docsView) viewOverlay(width, height int) string {
 		)
 	}
 	return box
+}
+
+// stringDocType returns a human-friendly label for the doc-type group
+// headers (e.g. "Project In Planning"). shortDocType remains the compact
+// chip form used in the preview pane.
+func stringDocType(t model.DocumentType) string {
+	switch t {
+	case model.DocTypeUserDocs:
+		return "User Docs"
+	case model.DocTypeProjectInPlanning:
+		return "Project In Planning"
+	case model.DocTypeProjectInProgress:
+		return "Project In Progress"
+	case model.DocTypeProjectComplete:
+		return "Project Complete"
+	case model.DocTypeVendorDocs:
+		return "Vendor Docs"
+	case model.DocTypeArchitecture:
+		return "Architecture"
+	case model.DocTypeDesigns:
+		return "Designs"
+	case model.DocTypeTestingPlans:
+		return "Testing Plans"
+	}
+	return string(t)
 }
 
 func shortDocType(t model.DocumentType) string {
