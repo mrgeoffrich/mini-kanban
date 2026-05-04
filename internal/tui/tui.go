@@ -4,10 +4,12 @@
 // strip, and the top-level key bindings (quit, switch tab). Each tab is a
 // `view`: a self-contained widget that handles its own input, state, and
 // rendering. Views can declare an active overlay (e.g. fullscreen card or
-// document viewer); when one is up the shell routes q/esc/tab to the view
-// (so esc closes the overlay, tab cycles inner panes), but digit
-// shortcuts always win — switching tabs from inside an overlay closes
-// that overlay so coming back lands on the base layout.
+// document viewer); when one is up the shell routes q/esc to the view
+// (so esc closes the overlay rather than quitting), but digit shortcuts
+// always win — switching tabs from inside an overlay closes that
+// overlay so coming back lands on the base layout. Tab/shift+tab are
+// view-local: the shell never grabs them, so each view can use them
+// for its own purposes (e.g. cycling card-overlay panes).
 package tui
 
 import (
@@ -159,19 +161,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		if !hasOverlay {
-			switch s {
-			case "esc":
-				return m, tea.Quit
-			case "tab":
-				m.active = (m.active + 1) % len(m.tabs)
-				m.returnTab = -1
-				return m, nil
-			case "shift+tab":
-				m.active = (m.active - 1 + len(m.tabs)) % len(m.tabs)
-				m.returnTab = -1
-				return m, nil
-			}
+		if !hasOverlay && s == "esc" {
+			return m, tea.Quit
 		}
 		cmd := m.tabs[m.active].v.Update(msg)
 		// If the active view just closed its overlay AND we have a

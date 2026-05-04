@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -73,6 +74,16 @@ type boardView struct {
 	picker    bool
 	pickerRow int
 
+	// Feature filter picker — opened with `f`. hiddenFeatures is keyed
+	// by slug; the sentinel store.HiddenFeaturesUnassigned represents
+	// the "no feature" group. featurePickerSlugs holds the list shown
+	// in the picker (snapshotted when the picker opens so the order
+	// doesn't shift while the user is navigating).
+	hiddenFeatures    map[string]bool
+	featurePicker     bool
+	featurePickerRow  int
+	featurePickerSlugs []string
+
 	lastRefresh time.Time
 
 	mdCache map[int]mdCacheEntry // see docsView for shape
@@ -107,15 +118,20 @@ func newBoardView(s *store.Store, repo *model.Repo) (*boardView, error) {
 	if err != nil {
 		return nil, err
 	}
+	hiddenFeats, err := s.LoadHiddenFeatures(repo.ID)
+	if err != nil {
+		return nil, err
+	}
 	b := &boardView{
-		store:         s,
-		repo:          repo,
-		states:        model.AllStates(),
-		hidden:        hidden,
-		columns:       map[model.State][]*model.Issue{},
-		rows:          map[model.State]int{},
-		scroll:        map[model.State]int{},
-		detailVisible: true,
+		store:          s,
+		repo:           repo,
+		states:         model.AllStates(),
+		hidden:         hidden,
+		hiddenFeatures: hiddenFeats,
+		columns:        map[model.State][]*model.Issue{},
+		rows:           map[model.State]int{},
+		scroll:         map[model.State]int{},
+		detailVisible:  true,
 	}
 	if err := b.reload(); err != nil {
 		return nil, err
@@ -171,6 +187,9 @@ func (b *boardView) reload() error {
 		b.columns[st] = nil
 	}
 	for _, iss := range issues {
+		if b.featureHidden(iss.FeatureSlug) {
+			continue
+		}
 		b.columns[iss.State] = append(b.columns[iss.State], iss)
 	}
 	// Issue descriptions may have changed under us — start the cache
@@ -178,6 +197,18 @@ func (b *boardView) reload() error {
 	// them.
 	b.mdCache = nil
 	return nil
+}
+
+// featureHidden reports whether the given feature slug is currently
+// filtered out via the feature picker. The empty slug ("") maps to
+// store.HiddenFeaturesUnassigned so "(unassigned)" can be toggled like
+// any other group.
+func (b *boardView) featureHidden(slug string) bool {
+	key := slug
+	if key == "" {
+		key = store.HiddenFeaturesUnassigned
+	}
+	return b.hiddenFeatures[key]
 }
 
 func (b *boardView) currentIssue() *model.Issue {
@@ -250,11 +281,12 @@ func (b *boardView) Status() string {
 	return "↻ " + b.lastRefresh.Format("15:04:05")
 }
 
-func (b *boardView) HasOverlay() bool { return b.overlay || b.picker }
+func (b *boardView) HasOverlay() bool { return b.overlay || b.picker || b.featurePicker }
 
 func (b *boardView) CloseOverlay() {
 	b.overlay = false
 	b.picker = false
+	b.featurePicker = false
 	b.commentOverlay = false
 }
 
@@ -266,6 +298,8 @@ func (b *boardView) Breadcrumb() string {
 		return "[" + b.selected.Key + "]"
 	case b.picker:
 		return "Columns"
+	case b.featurePicker:
+		return "Features"
 	}
 	return ""
 }
@@ -273,6 +307,8 @@ func (b *boardView) Breadcrumb() string {
 func (b *boardView) Help() string {
 	switch {
 	case b.picker:
+		return "j/k move · space toggle · a all · n none · esc close"
+	case b.featurePicker:
 		return "j/k move · space toggle · a all · n none · esc close"
 	case b.commentOverlay:
 		return "j/k scroll · g/G top/bottom · esc back"
@@ -285,7 +321,7 @@ func (b *boardView) Help() string {
 		}
 		return "tab next pane · j/k scroll · g/G top/bottom · esc close"
 	}
-	return "h/l cols · j/k cards · enter open · c columns · H hide col · d detail · r reload · q quit"
+	return "h/l cols · j/k cards · enter open · c columns · f features · H hide col · d detail · r reload · q quit"
 }
 
 func (b *boardView) Update(msg tea.Msg) tea.Cmd {
@@ -309,6 +345,10 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 	}
 	if b.picker {
 		b.updatePicker(key)
+		return nil
+	}
+	if b.featurePicker {
+		b.updateFeaturePicker(key)
 		return nil
 	}
 	if b.commentOverlay {
@@ -375,6 +415,8 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 		}
 	case "c":
 		b.openPicker()
+	case "f":
+		b.openFeaturePicker()
 	case "H":
 		// Quick power-user hide of the focused column. We refuse to hide
 		// the last visible column so the board never goes empty by accident.
@@ -592,12 +634,127 @@ func (b *boardView) updatePicker(key tea.KeyMsg) {
 	}
 }
 
+// openFeaturePicker snapshots the set of features in the current
+// repo's issues (plus the "(unassigned)" sentinel if any issue lacks
+// one) and parks the cursor at the top.
+func (b *boardView) openFeaturePicker() {
+	b.featurePicker = true
+	b.featurePickerRow = 0
+
+	seen := map[string]bool{}
+	hasUnassigned := false
+	// Re-fetch from the unfiltered list so the picker shows hidden
+	// features too (the user needs to be able to un-hide them).
+	all, err := b.store.ListIssues(store.IssueFilter{RepoID: &b.repo.ID})
+	if err != nil {
+		b.err = err
+		return
+	}
+	for _, iss := range all {
+		if iss.FeatureSlug == "" {
+			hasUnassigned = true
+			continue
+		}
+		seen[iss.FeatureSlug] = true
+	}
+	slugs := make([]string, 0, len(seen)+1)
+	for s := range seen {
+		slugs = append(slugs, s)
+	}
+	sort.Strings(slugs)
+	if hasUnassigned {
+		slugs = append(slugs, store.HiddenFeaturesUnassigned)
+	}
+	b.featurePickerSlugs = slugs
+}
+
+// persistHiddenFeatures writes the current hidden-features set to disk;
+// errors surface in the footer rather than crashing the loop.
+func (b *boardView) persistHiddenFeatures() {
+	if err := b.store.SaveHiddenFeatures(b.repo.ID, b.hiddenFeatures); err != nil {
+		b.err = err
+	}
+}
+
+// applyFeatureFilter rebuilds b.columns from the store, applying the
+// current hidden-features filter. Reuses reload() since that's where
+// the filter logic lives.
+func (b *boardView) applyFeatureFilter() {
+	if err := b.reload(); err != nil {
+		b.err = err
+	}
+	b.clampCol()
+	b.refreshSelection()
+}
+
+func (b *boardView) updateFeaturePicker(key tea.KeyMsg) {
+	n := len(b.featurePickerSlugs)
+	switch key.String() {
+	case "esc":
+		b.featurePicker = false
+	case "j", "down":
+		if b.featurePickerRow < n-1 {
+			b.featurePickerRow++
+		}
+	case "k", "up":
+		if b.featurePickerRow > 0 {
+			b.featurePickerRow--
+		}
+	case "g", "home":
+		b.featurePickerRow = 0
+	case "G", "end":
+		if n > 0 {
+			b.featurePickerRow = n - 1
+		}
+	case " ", "enter":
+		if n == 0 {
+			break
+		}
+		slug := b.featurePickerSlugs[b.featurePickerRow]
+		if b.hiddenFeatures == nil {
+			b.hiddenFeatures = map[string]bool{}
+		}
+		if b.hiddenFeatures[slug] {
+			delete(b.hiddenFeatures, slug)
+		} else {
+			b.hiddenFeatures[slug] = true
+		}
+		b.persistHiddenFeatures()
+		b.applyFeatureFilter()
+	case "a":
+		// Show all.
+		b.hiddenFeatures = map[string]bool{}
+		b.persistHiddenFeatures()
+		b.applyFeatureFilter()
+	case "n":
+		// Hide everything except the cursor row — quick "isolate this
+		// feature" shortcut. Cursor row is left visible to avoid leaving
+		// the board empty.
+		if n == 0 {
+			break
+		}
+		focus := b.featurePickerSlugs[b.featurePickerRow]
+		next := map[string]bool{}
+		for _, s := range b.featurePickerSlugs {
+			if s != focus {
+				next[s] = true
+			}
+		}
+		b.hiddenFeatures = next
+		b.persistHiddenFeatures()
+		b.applyFeatureFilter()
+	}
+}
+
 func (b *boardView) View(width, height int) string {
 	if width == 0 || height == 0 {
 		return ""
 	}
 	if b.picker {
 		return b.viewPicker(width, height)
+	}
+	if b.featurePicker {
+		return b.viewFeaturePicker(width, height)
 	}
 	if b.overlay {
 		return b.viewOverlay(width, height)
@@ -692,6 +849,70 @@ func (b *boardView) viewPicker(width, height int) string {
 		Render(card)
 }
 
+// viewFeaturePicker renders the feature-filter modal. Each row shows
+// the feature's colour stripe, a checkbox, the slug (or "(unassigned)"
+// for the no-feature group), and how many issues currently belong to
+// it across all states.
+func (b *boardView) viewFeaturePicker(width, height int) string {
+	innerWidth := 48
+	if innerWidth > width-6 {
+		innerWidth = max(24, width-6)
+	}
+
+	header := boldStyle.Render("Visible features")
+	rowStyle := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1)
+	selStyle := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
+		Background(cardSelectedBG).Foreground(lipgloss.Color("231"))
+
+	// Pre-compute counts across the unfiltered issue set so the picker
+	// shows reality, not the post-filter view.
+	all, _ := b.store.ListIssues(store.IssueFilter{RepoID: &b.repo.ID})
+	counts := map[string]int{}
+	for _, iss := range all {
+		key := iss.FeatureSlug
+		if key == "" {
+			key = store.HiddenFeaturesUnassigned
+		}
+		counts[key]++
+	}
+
+	var rows []string
+	rows = append(rows, header, "")
+	if len(b.featurePickerSlugs) == 0 {
+		rows = append(rows, mutedStyle.Italic(true).Render("(no features in this repo)"))
+	}
+	for i, slug := range b.featurePickerSlugs {
+		mark := "[×]"
+		if b.hiddenFeatures[slug] {
+			mark = "[ ]"
+		}
+		label := slug
+		colourSlug := slug
+		if slug == store.HiddenFeaturesUnassigned {
+			label = "(unassigned)"
+			colourSlug = ""
+		}
+		stripe := lipgloss.NewStyle().Foreground(featureColor(colourSlug)).Render("▌")
+		line := fmt.Sprintf("%s %s  %-22s  %d", stripe, mark, truncate(label, 22), counts[slug])
+		if i == b.featurePickerRow {
+			rows = append(rows, selStyle.Render(line))
+		} else {
+			rows = append(rows, rowStyle.Render(line))
+		}
+	}
+	rows = append(rows, "", mutedStyle.Render("space toggle · a all · n isolate · esc close"))
+
+	card := lipgloss.NewStyle().
+		Border(colBorder).BorderForeground(colFocusBorder).
+		Padding(1, 2).
+		Render(strings.Join(rows, "\n"))
+
+	return lipgloss.NewStyle().
+		Width(width).Height(height).
+		Align(lipgloss.Center, lipgloss.Center).
+		Render(card)
+}
+
 func (b *boardView) renderColumn(st model.State, focused bool, width, height int) string {
 	issues := b.columns[st]
 	sel := b.rows[st]
@@ -771,11 +992,17 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 		Align(lipgloss.Center).
 		Render(fmt.Sprintf("%s · %d%s", stateLabel(st), len(issues), indicator))
 
-	// Cards run flush against the column border on purpose: when columns
-	// get narrow, every column counts. The spacious vs packed layout below
-	// uses the full inner width on continuation lines.
-	cardStyle := lipgloss.NewStyle().Width(innerWidth)
-	selStyle := lipgloss.NewStyle().Width(innerWidth).
+	// 1 col reserved at the LEFT of every card line for a coloured
+	// stripe keyed on the issue's feature slug. Card content uses the
+	// remaining width; the stripe character ▌ sits flush against the
+	// column's inner border.
+	const stripeChar = "▌"
+	contentW := innerWidth - 1
+	if contentW < 3 {
+		contentW = 3
+	}
+	cardStyle := lipgloss.NewStyle().Width(contentW)
+	selStyle := lipgloss.NewStyle().Width(contentW).
 		Background(cardSelectedBG).Foreground(lipgloss.Color("231"))
 
 	var lines []string
@@ -785,8 +1012,7 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 	for i := scroll; i < end; i++ {
 		iss := issues[i]
 		bracketed := "[" + iss.Key + "]"
-		// No more cardStyle padding — content uses the full inner width.
-		fullW := innerWidth
+		fullW := contentW
 
 		isSel := i == sel && focused
 		styler := cardStyle
@@ -801,20 +1027,25 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 			keyRender = bracketed
 		}
 
+		stripe := lipgloss.NewStyle().Foreground(featureColor(iss.FeatureSlug)).Render(stripeChar)
+		emit := func(content string) {
+			lines = append(lines, stripe+styler.Render(content))
+		}
+
 		// If the title fits on a single line at the full inner width, use
 		// the spacious layout: [KEY] alone on line 0, title alone on line
 		// 1. This avoids the line-0 prefix gutter eating into the title's
 		// budget for the common short-title case.
 		if titleRunes := []rune(iss.Title); len(titleRunes) <= fullW {
-			lines = append(lines, styler.Render(keyRender))
-			lines = append(lines, styler.Render(iss.Title))
+			emit(keyRender)
+			emit(iss.Title)
 			continue
 		}
 
 		// Title needs both lines. Pack [KEY] + the start of the title on
 		// line 0, then the continuation on line 1.
 		prefixW := len(bracketed) + 2 // [KEY] + two-space gutter
-		firstW := innerWidth - prefixW
+		firstW := contentW - prefixW
 		if firstW < 4 {
 			firstW = 4
 		}
@@ -839,7 +1070,7 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 			default:
 				content = ""
 			}
-			lines = append(lines, styler.Render(content))
+			emit(content)
 		}
 	}
 

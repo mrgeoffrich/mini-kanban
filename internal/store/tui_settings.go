@@ -79,3 +79,46 @@ func (s *Store) SaveHiddenStates(repoID int64, hidden map[model.State]bool) erro
 	sort.Strings(names)
 	return s.SetTUISetting(repoID, boardHiddenKey, strings.Join(names, ","))
 }
+
+const boardHiddenFeaturesKey = "board.hidden_features"
+
+// HiddenFeaturesUnassigned is the sentinel slug stored when the user
+// has hidden the "(unassigned)" group — i.e. issues that have no
+// feature attached. Real feature slugs in this codebase don't use the
+// "__none__" form, so collisions are not a practical concern.
+const HiddenFeaturesUnassigned = "__none__"
+
+// LoadHiddenFeatures returns the set of feature slugs the user has
+// hidden in the board view. The sentinel HiddenFeaturesUnassigned
+// represents the "no feature" group.
+func (s *Store) LoadHiddenFeatures(repoID int64) (map[string]bool, error) {
+	raw, err := s.GetTUISetting(repoID, boardHiddenFeaturesKey)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	if raw == "" {
+		return out, nil
+	}
+	for _, name := range strings.Split(raw, ",") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		out[name] = true
+	}
+	return out, nil
+}
+
+// SaveHiddenFeatures persists the hidden set as a comma-separated list
+// of slugs, sorted for stable storage.
+func (s *Store) SaveHiddenFeatures(repoID int64, hidden map[string]bool) error {
+	names := make([]string, 0, len(hidden))
+	for slug, on := range hidden {
+		if on {
+			names = append(names, slug)
+		}
+	}
+	sort.Strings(names)
+	return s.SetTUISetting(repoID, boardHiddenFeaturesKey, strings.Join(names, ","))
+}

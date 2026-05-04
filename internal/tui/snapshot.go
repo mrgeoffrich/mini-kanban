@@ -70,6 +70,9 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 	case "picker":
 		m.active = 0
 		board.openPicker()
+	case "feature-picker":
+		m.active = 0
+		board.openFeaturePicker()
 	case "doc-overlay":
 		m.active = 2
 		if docs.loaded != nil {

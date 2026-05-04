@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"hash/fnv"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // Shared styles. Kept in one place so palette tweaks land everywhere.
 var (
@@ -46,3 +50,35 @@ var (
 	cardKeyColor     = lipgloss.Color("147")
 	mutedColor       = lipgloss.Color("241")
 )
+
+// featurePalette is a curated set of distinguishable 256-colour ANSI
+// values used to colour the per-card feature stripe. Picked for
+// reasonable contrast on dark terminals; avoid greys / borderline whites
+// since they collide with chrome colours above.
+var featurePalette = []lipgloss.Color{
+	lipgloss.Color("39"),  // bright blue
+	lipgloss.Color("208"), // orange
+	lipgloss.Color("76"),  // green
+	lipgloss.Color("203"), // pink
+	lipgloss.Color("220"), // gold
+	lipgloss.Color("75"),  // sky
+	lipgloss.Color("165"), // magenta
+	lipgloss.Color("118"), // lime
+	lipgloss.Color("215"), // peach
+	lipgloss.Color("147"), // lavender
+	lipgloss.Color("129"), // purple
+	lipgloss.Color("33"),  // royal blue
+}
+
+// featureColor maps a feature slug to a stable colour from
+// featurePalette. Slug "" (no feature) returns the muted colour so
+// unassigned issues are visually quiet. Hash collisions are accepted as
+// the cost of zero configuration.
+func featureColor(slug string) lipgloss.Color {
+	if slug == "" {
+		return mutedColor
+	}
+	h := fnv.New32a()
+	h.Write([]byte(slug))
+	return featurePalette[h.Sum32()%uint32(len(featurePalette))]
+}
