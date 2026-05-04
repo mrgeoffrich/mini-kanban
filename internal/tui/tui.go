@@ -202,6 +202,12 @@ func (m *Model) View() string {
 		bodyHeight = 5
 	}
 	body := m.tabs[m.active].v.View(m.width, bodyHeight)
+	// Strict-clip and pad so the active view can never push the tab
+	// strip / footer off-screen by overflowing its row budget.
+	body = scrollLines(body, 0, bodyHeight)
+	if missing := bodyHeight - totalLines(body); missing > 0 {
+		body += strings.Repeat("\n", missing)
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 }
 
