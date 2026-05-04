@@ -136,6 +136,13 @@ func (d *docsView) HasOverlay() bool { return d.overlay }
 
 func (d *docsView) CloseOverlay() { d.overlay = false }
 
+func (d *docsView) Breadcrumb() string {
+	if d.overlay && d.loaded != nil {
+		return d.loaded.Filename
+	}
+	return ""
+}
+
 func (d *docsView) Help() string {
 	if d.overlay {
 		return "j/k scroll · g/G top/bottom · esc close"

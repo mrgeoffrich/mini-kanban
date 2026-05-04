@@ -109,6 +109,13 @@ func (f *featuresView) HasOverlay() bool { return f.overlay }
 
 func (f *featuresView) CloseOverlay() { f.overlay = false }
 
+func (f *featuresView) Breadcrumb() string {
+	if f.overlay && f.selected != nil {
+		return "[" + f.selected.Slug + "]"
+	}
+	return ""
+}
+
 func (f *featuresView) Help() string {
 	if f.overlay {
 		return "j/k scroll · g/G top/bottom · esc close"

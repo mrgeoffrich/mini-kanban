@@ -39,6 +39,12 @@ type view interface {
 	// the user switches tabs from inside an overlay.
 	CloseOverlay()
 	Status() string
+	// Breadcrumb returns the trail beyond the tab name when a detail
+	// overlay is up — e.g. "[MINI-22]" or "[MINI-22] → Comments". When
+	// non-empty, the shell shows "{tabName} → {Breadcrumb}" in place of
+	// the tab strip. Empty means no detail; the regular tab strip
+	// renders as usual.
+	Breadcrumb() string
 }
 
 type tab struct {
@@ -235,23 +241,34 @@ func (m *Model) renderHeader() string {
 	}
 	repoTag := titleStyle.Render(fmt.Sprintf("%s — %s %s", m.repo.Prefix, repoGlyph, displayName))
 
-	var tabParts []string
-	for i, t := range m.tabs {
-		label := fmt.Sprintf("%d %s", i+1, t.name)
-		if i == m.active {
-			tabParts = append(tabParts, tabActive.Render(label))
-		} else {
-			tabParts = append(tabParts, tabInactive.Render(label))
+	var left string
+	if crumb := m.tabs[m.active].v.Breadcrumb(); crumb != "" {
+		// On a detail page: tab strip is replaced by a breadcrumb.
+		// Tab name in muted, separator in muted, leaf in active style.
+		left = lipgloss.JoinHorizontal(lipgloss.Top,
+			tabInactive.Render(m.tabs[m.active].name),
+			mutedStyle.Render(" → "),
+			tabActive.Render(crumb),
+		)
+	} else {
+		var tabParts []string
+		for i, t := range m.tabs {
+			label := fmt.Sprintf("%d %s", i+1, t.name)
+			if i == m.active {
+				tabParts = append(tabParts, tabActive.Render(label))
+			} else {
+				tabParts = append(tabParts, tabInactive.Render(label))
+			}
 		}
+		left = lipgloss.JoinHorizontal(lipgloss.Top, tabParts...)
 	}
-	tabs := lipgloss.JoinHorizontal(lipgloss.Top, tabParts...)
 
-	gap := m.width - lipgloss.Width(repoTag) - lipgloss.Width(tabs)
+	gap := m.width - lipgloss.Width(repoTag) - lipgloss.Width(left)
 	if gap < 1 {
 		gap = 1
 	}
 	spacer := lipgloss.NewStyle().Width(gap).Render("")
-	return lipgloss.JoinHorizontal(lipgloss.Top, repoTag, spacer, tabs)
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, spacer, repoTag)
 }
 
 // digitSwitchTarget maps a "1"–"9" key to a 0-based tab index. Returns

@@ -258,6 +258,18 @@ func (b *boardView) CloseOverlay() {
 	b.commentOverlay = false
 }
 
+func (b *boardView) Breadcrumb() string {
+	switch {
+	case b.commentOverlay && b.selected != nil:
+		return "[" + b.selected.Key + "] → Comments"
+	case b.overlay && b.selected != nil:
+		return "[" + b.selected.Key + "]"
+	case b.picker:
+		return "Columns"
+	}
+	return ""
+}
+
 func (b *boardView) Help() string {
 	switch {
 	case b.picker:
