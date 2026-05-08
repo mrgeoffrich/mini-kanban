@@ -4,6 +4,20 @@ Working notes distilled from Justin Poehnelt's [Rewrite Your CLI for AI Agents](
 
 This document captures the **takeaways only**. Each principle gets a separate follow-up pass where we judge how (or whether) it applies to `mk`.
 
+## Status
+
+| # | Principle | Status |
+| --- | --- | --- |
+| 1 | Raw JSON payloads over custom flags | Shipped — `--json` on every mutating command |
+| 2 | Runtime schema introspection | Shipped — `mk schema list / show / all` |
+| 3 | Context-window discipline | Shipped — lean list outputs, opt-in heavy fields |
+| 4 | Defensive input validation | Shipped — store-layer validators, control-char rejection |
+| 5 | Dry-run mode for mutations | Pending |
+| 6 | Agent-specific documentation | Partially in place — `SKILL.md` is the agent-facing reference; revisit in light of #5 |
+| 7 | Multi-surface architecture (MCP) | Pending — currently CLI-only |
+| 8 | Response sanitization | Pending |
+| 9 | Incremental implementation | Ongoing — already how we're doing it |
+
 ## Key takeaways
 
 ### 1. Raw JSON payloads over custom flags
@@ -43,6 +57,8 @@ Walk through each principle in order and decide:
 ---
 
 ## Principle #1 — JSON input on every mutating command
+
+**Status:** Shipped (commit `c5681c6`). The flag landed as `--json` (alias `-j`) rather than `--input`.
 
 **Decision:** every mutating command gains a `--json` flag that accepts a JSON payload describing the entire operation. Existing positionals and typed flags stay (so humans keep their ergonomic surface), but `--json` is mutually exclusive with them — it's either the JSON path or the flag path, never a mix.
 
@@ -238,6 +254,8 @@ One commit per command group keeps the diff reviewable: `issue`, then `feature`,
 
 ## Principle #2 — Runtime schema introspection
 
+**Status:** Shipped (commit `de9453b`).
+
 **Decision:** add a `mk schema` command tree that emits JSON Schema for every mutating command's `--json` payload, derived from the same Go structs that decode the input. Agents discover shapes at runtime instead of memorising them from `SKILL.md`.
 
 ### Why pair with #1
@@ -385,6 +403,8 @@ Two phases, ordered. The whole thing fits in roughly the commit count of #1 alon
 
 ## Principle #3 — Context-window discipline
 
+**Status:** Shipped (commit `6f01e46`).
+
 **Decision:** trim the verbose JSON outputs that bloat agent context, by switching list operations to lean-by-default and adding opt-in flags for callers that genuinely need the heavy fields. No new dep, no new output mode.
 
 ### Where mk currently bloats
@@ -437,6 +457,8 @@ No schema-side changes (`mk schema` is for `--json` *inputs*, not output shapes)
 ---
 
 ## Principle #4 — Defensive input validation
+
+**Status:** Shipped (commit `f25b7e3`).
 
 **Decision:** centralise validation in `internal/store/validate.go` and call it from every mutation entry point in the store. Catches hallucinated nonsense before it lands in the DB or the audit log.
 
