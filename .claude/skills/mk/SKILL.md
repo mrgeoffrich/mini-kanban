@@ -36,6 +36,47 @@ description: Use this skill whenever you need to create, read, update, or organi
 - **`--user` is REQUIRED for AI agents.** Every mutation is recorded in an audit log alongside the actor that performed it. The CLI will silently fall back to the OS username if `--user` is omitted, but for agents that produces useless `<your-os-user> did everything` history. **Always pass `--user <your-agent-name>` (e.g. `--user Claude`) on every mutating command.** Treat it as mandatory in any agent-driven invocation, even though the binary tolerates its absence for human users.
 - **Database override.** `--db <path>` is a global flag, useful for tests. In production agents, leave it at the default.
 
+### Recommended: drive `mk` via `--json` (JSON)
+
+Every mutating command accepts `--json` (alias `-i`) — a JSON payload that fully describes the operation. **Prefer this over typed flags when driving `mk` from an agent.** It's strict (typos surface as `unknown field` errors instead of silent no-ops), it removes the `--description-file` / stdin dance for long text, and the schema is published at runtime so you don't have to memorise field names.
+
+- `--json '<json>'` — inline JSON.
+- `--json -` — read JSON from stdin.
+- `--json @path/to.json` — read JSON from a file.
+
+`--json` is **mutually exclusive** with positionals and per-field flags (`--title`, `--state`, etc.). Mixing them is rejected with a clear error.
+
+**Discover shapes at runtime, don't guess:**
+
+```bash
+mk schema list                # every command name with --json + one-line description
+mk schema show issue.add      # full JSON Schema (draft 2020-12) for one command
+mk schema all                 # every schema, keyed by command name (one ingest pass)
+```
+
+Each schema includes a worked `examples[0]` you can copy and adapt:
+
+```bash
+$ mk schema show issue.add | jq .examples[0]
+{
+  "title": "Pin tab strip in place",
+  "feature_slug": "tui-polish",
+  "description": "Body height should clip the tab strip so it doesn't drift on overflow.",
+  "state": "todo",
+  "tags": ["ui", "tui"]
+}
+
+$ mk schema show issue.add | jq .examples[0] | mk issue add --user agent-claude --json -
+```
+
+**Conventions baked into the JSON path:**
+
+- **Issue keys must be canonical** (`MINI-42`, not `42`). The bare-number shortcut is for humans on the CLI flag path only.
+- **Long-text fields are inline strings.** No JSON-side `--description-file`; just put the markdown directly in the `description` / `body` / `content` field.
+- **Edit semantics on `*string` fields:** field absent = no change; empty string = clear (where the model allows). Required fields like `title` reject empty strings — omit the field to leave the value alone.
+- **Globals stay as flags.** `--user`, `--db`, and `-o text|json` are passed as flags alongside `--json`, not inside the JSON.
+- **Strict decoding.** Unknown fields fail the call. If you get `unknown field "..."` errors, run `mk schema show <command>` to see the exact accepted shape.
+
 ## Command reference
 
 Every command supports `-o text|json` and `--db <path>` as global flags. Examples below omit them unless relevant.
