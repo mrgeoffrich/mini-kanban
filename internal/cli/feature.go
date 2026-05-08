@@ -87,9 +87,10 @@ func createFeature(title, slug, description string) error {
 }
 
 func featureListCmd() *cobra.Command {
-	return &cobra.Command{
+	var withDescription bool
+	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List features in the current repo",
+		Short: "List features in the current repo (descriptions are stripped by default; pass --with-description to include them)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := openStore()
 			if err != nil {
@@ -100,13 +101,15 @@ func featureListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fs, err := s.ListFeatures(repo.ID)
+			fs, err := s.ListFeatures(repo.ID, withDescription)
 			if err != nil {
 				return err
 			}
 			return emit(fs)
 		},
 	}
+	cmd.Flags().BoolVar(&withDescription, "with-description", false, "include each feature's full description in JSON output (off by default to keep responses small)")
+	return cmd
 }
 
 func featureShowCmd() *cobra.Command {

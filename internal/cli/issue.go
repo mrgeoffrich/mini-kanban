@@ -179,14 +179,15 @@ func createIssue(title, featureSlug, description string, state model.State, tags
 
 func issueListCmd() *cobra.Command {
 	var (
-		stateCSV    string
-		featureSlug string
-		tags        []string
-		allRepos    bool
+		stateCSV        string
+		featureSlug     string
+		tags            []string
+		allRepos        bool
+		withDescription bool
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List issues",
+		Short: "List issues (descriptions are stripped by default; pass --with-description to include them)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := openStore()
 			if err != nil {
@@ -194,7 +195,7 @@ func issueListCmd() *cobra.Command {
 			}
 			defer s.Close()
 
-			f := store.IssueFilter{AllRepos: allRepos}
+			f := store.IssueFilter{AllRepos: allRepos, IncludeDescription: withDescription}
 			if !allRepos {
 				repo, err := resolveRepo(s)
 				if err != nil {
@@ -236,6 +237,7 @@ func issueListCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&featureSlug, "feature", "f", "", "limit to a feature")
 	cmd.Flags().StringSliceVar(&tags, "tag", nil, "require this tag (repeatable; AND semantics)")
 	cmd.Flags().BoolVar(&allRepos, "all-repos", false, "search across all tracked repos")
+	cmd.Flags().BoolVar(&withDescription, "with-description", false, "include each issue's full description in JSON output (off by default to keep responses small)")
 	return cmd
 }
 
@@ -527,6 +529,7 @@ func issueBriefCmd() *cobra.Command {
 	var (
 		noFeatureDocs bool
 		noComments    bool
+		noDocContent  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "brief <KEY>",
@@ -539,7 +542,12 @@ that every skill was open-coding into one read.
 Linked docs from the parent feature are included by default (use
 --no-feature-docs to skip). Each doc carries a "linked_via" array that
 records every attribution path (e.g. ["issue"] or
-["issue", "feature/auth-rewrite"]).`,
+["issue", "feature/auth-rewrite"]).
+
+Pass --no-doc-content to keep doc metadata (filename, type, source_path,
+linked_via, description) but drop the bodies — useful when you want the
+shape of an issue's context without paying for every linked doc's full
+text. Fetch specific bodies later via mk doc show.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			s, err := openStore()
@@ -576,6 +584,11 @@ records every attribution path (e.g. ["issue"] or
 			if err != nil {
 				return err
 			}
+			if noDocContent {
+				for _, d := range docs {
+					d.Content = ""
+				}
+			}
 
 			var comments []*model.Comment
 			if !noComments {
@@ -604,6 +617,7 @@ records every attribution path (e.g. ["issue"] or
 	}
 	cmd.Flags().BoolVar(&noFeatureDocs, "no-feature-docs", false, "skip docs linked to the parent feature")
 	cmd.Flags().BoolVar(&noComments, "no-comments", false, "skip the comments section")
+	cmd.Flags().BoolVar(&noDocContent, "no-doc-content", false, "keep linked-doc metadata but drop their bodies (fetch via `mk doc show`)")
 	return cmd
 }
 

@@ -45,7 +45,11 @@ func (s *Store) GetFeatureBySlug(repoID int64, slug string) (*model.Feature, err
 	return scanFeature(s.DB.QueryRow(`SELECT id, repo_id, slug, title, description, created_at, updated_at FROM features WHERE repo_id = ? AND slug = ?`, repoID, slug))
 }
 
-func (s *Store) ListFeatures(repoID int64) ([]*model.Feature, error) {
+// ListFeatures returns every feature in the repo. When includeDescription is
+// false the heavy `description` field is stripped post-scan — list contexts
+// rarely want full bodies inlined, and dropping them keeps the JSON output
+// small enough to fit comfortably into an agent's context window.
+func (s *Store) ListFeatures(repoID int64, includeDescription bool) ([]*model.Feature, error) {
 	rows, err := s.DB.Query(`SELECT id, repo_id, slug, title, description, created_at, updated_at FROM features WHERE repo_id = ? ORDER BY created_at`, repoID)
 	if err != nil {
 		return nil, err
@@ -56,6 +60,9 @@ func (s *Store) ListFeatures(repoID int64) ([]*model.Feature, error) {
 		f, err := scanFeature(rows)
 		if err != nil {
 			return nil, err
+		}
+		if !includeDescription {
+			f.Description = ""
 		}
 		out = append(out, f)
 	}

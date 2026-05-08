@@ -453,12 +453,15 @@ func docListCmd() *cobra.Command {
 }
 
 func docShowCmd() *cobra.Command {
-	var raw bool
+	var raw, metadata bool
 	cmd := &cobra.Command{
 		Use:   "show <filename>",
 		Short: "Show a document's metadata, content, and links",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if raw && metadata {
+				return fmt.Errorf("--raw and --metadata are mutually exclusive")
+			}
 			s, err := openStore()
 			if err != nil {
 				return err
@@ -468,7 +471,7 @@ func docShowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			d, err := s.GetDocumentByFilename(repo.ID, args[0], true)
+			d, err := s.GetDocumentByFilename(repo.ID, args[0], !metadata)
 			if err != nil {
 				return err
 			}
@@ -484,6 +487,7 @@ func docShowCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&raw, "raw", false, "write content to stdout with no metadata (ignores --output)")
+	cmd.Flags().BoolVar(&metadata, "metadata", false, "skip the document body (returns type, size, links, and timestamps only)")
 	return cmd
 }
 

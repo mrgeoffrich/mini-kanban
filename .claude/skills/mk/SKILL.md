@@ -38,7 +38,7 @@ description: Use this skill whenever you need to create, read, update, or organi
 
 ### Recommended: drive `mk` via `--json` (JSON)
 
-Every mutating command accepts `--json` (alias `-i`) — a JSON payload that fully describes the operation. **Prefer this over typed flags when driving `mk` from an agent.** It's strict (typos surface as `unknown field` errors instead of silent no-ops), it removes the `--description-file` / stdin dance for long text, and the schema is published at runtime so you don't have to memorise field names.
+Every mutating command accepts `--json` (alias `-j`) — a JSON payload that fully describes the operation. **Prefer this over typed flags when driving `mk` from an agent.** It's strict (typos surface as `unknown field` errors instead of silent no-ops), it removes the `--description-file` / stdin dance for long text, and the schema is published at runtime so you don't have to memorise field names.
 
 - `--json '<json>'` — inline JSON.
 - `--json -` — read JSON from stdin.
@@ -76,6 +76,22 @@ $ mk schema show issue.add | jq .examples[0] | mk issue add --user agent-claude 
 - **Edit semantics on `*string` fields:** field absent = no change; empty string = clear (where the model allows). Required fields like `title` reject empty strings — omit the field to leave the value alone.
 - **Globals stay as flags.** `--user`, `--db`, and `-o text|json` are passed as flags alongside `--json`, not inside the JSON.
 - **Strict decoding.** Unknown fields fail the call. If you get `unknown field "..."` errors, run `mk schema show <command>` to see the exact accepted shape.
+
+### Output is lean by default
+
+To keep agent context windows small, list-style commands strip heavy fields by default:
+
+- `mk issue list -o json` — no `description`. Pass `--with-description` to inline bodies.
+- `mk feature list -o json` — no `description`. Pass `--with-description` to inline bodies.
+- `mk doc list -o json` — already metadata-only (emits `size_bytes`, never `content`).
+
+When you need just the metadata of a single document, pass `--metadata` to `mk doc show <name>` and the body is skipped. Pair it with `--raw` (mutually exclusive) only if you wanted the body and nothing else.
+
+`mk issue brief <KEY>` is the one bulk-context call that *does* inline doc bodies on purpose — it exists so a skill can read everything in one shot. Three opt-outs trim it when the full payload is too much:
+
+- `--no-feature-docs` — skip docs linked to the parent feature.
+- `--no-comments` — skip the comments section.
+- `--no-doc-content` — keep linked-doc metadata (filename, type, source_path, linked_via, description) but drop the bodies. Fetch specific bodies later via `mk doc show <name>`.
 
 ## Command reference
 

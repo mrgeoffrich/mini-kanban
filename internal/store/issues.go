@@ -99,6 +99,11 @@ type IssueFilter struct {
 	FeatureID *int64
 	Tags      []string // AND semantics: issue must have ALL of these tags
 	AllRepos  bool
+
+	// IncludeDescription, when true, leaves the heavy `description` field
+	// populated on each returned issue. Defaults to false so list responses
+	// stay lean — full bodies are available via `mk issue show` / `brief`.
+	IncludeDescription bool
 }
 
 func (s *Store) ListIssues(f IssueFilter) ([]*model.Issue, error) {
@@ -165,6 +170,9 @@ func (s *Store) ListIssues(f IssueFilter) ([]*model.Issue, error) {
 		iss.Tags = tagMap[iss.ID]
 		if iss.Tags == nil {
 			iss.Tags = []string{}
+		}
+		if !f.IncludeDescription {
+			iss.Description = ""
 		}
 	}
 	return out, nil

@@ -48,7 +48,7 @@ Walk through each principle in order and decide:
 
 ### Conventions
 
-- **Flag name:** `--json` (alias `-i`). Value is either inline JSON or `-` for stdin. `--json @path/to.json` reads a file. (Cobra has no built-in `@` magic; we implement the same logic as `readLongText`.)
+- **Flag name:** `--json` (alias `-j`). Value is either inline JSON or `-` for stdin. `--json @path/to.json` reads a file. (Cobra has no built-in `@` magic; we implement the same logic as `readLongText`.)
 - **Globals stay as flags.** `--db`, `--user`, `--output` are transport/auth/format concerns, not part of the operation payload. Agents pass `--user` alongside `--json` exactly as they do alongside positionals today. We do *not* mirror them inside the JSON — keeping layers separated.
 - **Strict decoding.** `json.Decoder.DisallowUnknownFields()` so a typo'd field is a hard error, not a silent no-op. Article principle #4 lands here cheap.
 - **Output shape unchanged.** `--json` doesn't change what the command emits — the resulting object goes to stdout, formatted by `--output text|json`. (Realistically, agents driving `--json` will set `--output json`; we should consider auto-flipping the default when `--json` is present.)
@@ -380,3 +380,56 @@ Two phases, ordered. The whole thing fits in roughly the commit count of #1 alon
 - Bulk `mk apply` / NDJSON. Different concern (#3 territory).
 - Dry-run validation of payloads (#5).
 - Codegenning the schemas at build time. Reflection is fine until proven otherwise.
+
+---
+
+## Principle #3 — Context-window discipline
+
+**Decision:** trim the verbose JSON outputs that bloat agent context, by switching list operations to lean-by-default and adding opt-in flags for callers that genuinely need the heavy fields. No new dep, no new output mode.
+
+### Where mk currently bloats
+
+A quick survey of JSON outputs against a fresh DB:
+
+| Command | Heavy field | Default behaviour |
+| --- | --- | --- |
+| `mk issue list` | `description` | inlined in full on every row |
+| `mk feature list` | `description` | inlined in full on every row |
+| `mk doc list` | (none — already lean: emits `size_bytes`, no `content`) | OK |
+| `mk doc show` | `content` | inlined in full (correct for `show`, but no metadata-only mode) |
+| `mk issue brief` | linked-doc `content` × N | every linked doc body inlined |
+| `mk history` | (none — `details` is already a short string) | OK |
+
+`description` and `content` are the heavy hitters. A backlog of 50 issues with multi-paragraph descriptions easily produces a 50KB+ JSON blob from `mk issue list` — most of which the agent didn't ask for.
+
+### What we're changing
+
+**A. List operations become lean by default.**
+- `mk issue list` JSON: drop `description`. Add `--with-description` to opt back in.
+- `mk feature list` JSON: drop `description`. Add `--with-description` to opt back in.
+- Text output is already terse for both — no change there. The bloat was JSON-only.
+- Backwards-compat note: anyone parsing `description` out of list output today must add `--with-description`. mk is local-only and single-user; the migration is a one-line script change.
+
+**B. Selective `mk doc show`.**
+- Add `--metadata` to `mk doc show <name>`: emit type, size, links, timestamps — drop `content`. Default behaviour (full content) is unchanged for backwards compatibility.
+
+**C. Selective `mk issue brief`.**
+- Add `--no-doc-content` flag (joining the existing `--no-feature-docs` and `--no-comments`). Linked docs still appear with filename, type, source_path, linked_via, description — just not `content`. An agent inspects what's relevant, then `mk doc show` only the body it actually needs.
+
+That's the whole change. No NDJSON, no `--field`/`--projection` mask, no streaming.
+
+### Pushback / what we're *not* doing
+
+- **NDJSON output** — the article recommends it. For mk it would be useful only on the rare command that returns 1000+ rows; today's largest realistic response is `mk issue brief` which is one object. Defer until evidence shows we need it.
+- **Generic `--field a,b,c` projection** — clean in principle, but principle #1 already lets agents fetch via `--json` what they need; over-engineering a projection layer for the few list commands that bloat is poor return on engineering. Three opt-in flags cover the actual hot spots.
+- **Removing `description` from the model entirely** — descriptions are still wanted on `show` and `brief`. The fix is "don't return them in *list* contexts", not "drop them from the type".
+
+### Implementation outline
+
+- `internal/store/issues.go` — `ListIssues` clears `Description` on each returned issue unless `IncludeDescription` is set on `IssueFilter`. Same approach for `ListFeatures` (add `IncludeDescription` parameter or option).
+- `internal/cli/issue.go` and `feature.go` — add `--with-description` flag; thread through to the filter.
+- `internal/cli/doc.go` — `docShowCmd` already builds a `docView` with the document inline; add `--metadata` that nils out `Content` before emitting.
+- `internal/cli/issue.go` (`issueBriefCmd`) — add `--no-doc-content` boolean that empties each `briefDoc.Content` before emitting.
+- `SKILL.md` — one paragraph: "lists are lean by default; pass `--with-description` if you actually want bodies inlined."
+
+No schema-side changes (`mk schema` is for `--json` *inputs*, not output shapes).
