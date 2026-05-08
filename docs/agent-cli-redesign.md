@@ -433,3 +433,65 @@ That's the whole change. No NDJSON, no `--field`/`--projection` mask, no streami
 - `SKILL.md` — one paragraph: "lists are lean by default; pass `--with-description` if you actually want bodies inlined."
 
 No schema-side changes (`mk schema` is for `--json` *inputs*, not output shapes).
+
+---
+
+## Principle #4 — Defensive input validation
+
+**Decision:** centralise validation in `internal/store/validate.go` and call it from every mutation entry point in the store. Catches hallucinated nonsense before it lands in the DB or the audit log.
+
+### Threat model
+
+mk is local-only and single-user, so we're not defending against malicious actors. The realistic threats are:
+
+1. **Display / audit-log corruption** — agents pasting control characters, NULs, ANSI escape sequences in titles, names, comments. Breaks `mk history` rendering, `mk issue show` output, and any future log-aggregation tooling.
+2. **Filesystem escape** — `..`, absolute paths, or NUL bytes in document filenames or `--from-path`. Already mostly handled (`validateDocFilename`, `validateRelativePath`); tighten the gaps.
+3. **Wrong-shape identifiers** — slugs with whitespace, tags with newlines, `--user` actor names with embedded `\n`. Today these flow straight into history details and break log lines.
+4. **Resource exhaustion** — agents pasting 50MB markdown into a description. Local DB so not catastrophic; capping is cheap and avoids surprise.
+5. **Invalid UTF-8** — already enforced for doc content; missing for everything else.
+
+### What we already have
+
+| Validator | Checks |
+| --- | --- |
+| `store.ValidatePrefix` | exactly 4 alnum chars |
+| `store.ParseIssueKey` | `^[A-Za-z0-9]{4}-\d+$` |
+| `model.ParseState` | closed enum |
+| `model.ParseDocumentType` | closed enum |
+| `store.NormalizeTag(s)` | strips whitespace, rejects empty, rejects internal whitespace |
+| `cli.validateDocFilename` | rejects `/`, `\`, `\x00` |
+| `cli.validateRelativePath` | rejects absolute, rejects `..` traversal |
+| `cli.validatePRURL` | http/https scheme, host present |
+| `decodeStrict` (principle #1) | unknown JSON fields → error |
+
+### What we add
+
+A new package-private validator suite in `internal/store/validate.go`:
+
+| Helper | Purpose |
+| --- | --- |
+| `validateText(s, opts)` | core: required, max length, allow newlines, reject control chars, require valid UTF-8 |
+| `validateTitle(s, field)` | single-line, max 200, required |
+| `validateBody(s, field)` | multi-line, max 1 MiB, optional |
+| `validateName(s, field)` | single-line, max 80, required (assignee, comment author) |
+| `validateActor(s)` | single-line, max 80, required (`--user`) |
+| `validateSlug(s)` | `^[a-z0-9][a-z0-9-]*$`, max 60 |
+| `validateDocFilenameStrict` | tighten current rules: also reject control chars, `..`, leading/trailing whitespace, > 200 chars |
+| `validatePRURLStrict` | tighten current rules: also reject control chars, > 2 KiB |
+
+The "reject control chars" rule is:
+- Single-line fields (title, name, slug, actor, filename, URL): reject all `\x00–\x1F` and `\x7F`.
+- Multi-line fields (body, description, content): reject `\x00–\x08`, `\x0B`, `\x0C`, `\x0E–\x1F`, `\x7F`. Allow `\t` (`\x09`), `\n` (`\x0A`), `\r` (`\x0D`).
+
+### Where validation runs
+
+**Inside store mutations.** `CreateIssue`, `UpdateIssue`, `CreateFeature`, `UpdateFeature`, `SetIssueAssignee`, `CreateComment`, `CreateDocument`, `UpdateDocument`, `RenameDocument`, `AttachPR`. The CLI keeps its early validators (filename, prefix, PR URL) for fast-fail and good UX, but the store is the last line of defence — any future caller (TUI, tests, programmatic API) gets the same protection.
+
+**At `--user` resolution.** `actor()` in `internal/cli/audit.go` runs `validateActor` once and errors at command start if `--user` was malformed.
+
+### What we deliberately don't do
+
+- **Unicode bidi-override / zero-width filtering.** Defensible for a public service displaying user-supplied text to other users; overkill for a single-user local tracker.
+- **HTML/markdown sanitisation.** mk doesn't render HTML; markdown is rendered by glamour in the TUI which is its own escape boundary.
+- **Output sanitisation.** Principle #8 territory; separate pass.
+- **Idempotency keys / replay protection.** No remote API, no concurrent writers worth worrying about.

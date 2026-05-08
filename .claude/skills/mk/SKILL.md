@@ -93,6 +93,18 @@ When you need just the metadata of a single document, pass `--metadata` to `mk d
 - `--no-comments` — skip the comments section.
 - `--no-doc-content` — keep linked-doc metadata (filename, type, source_path, linked_via, description) but drop the bodies. Fetch specific bodies later via `mk doc show <name>`.
 
+### Input validation contract
+
+Every mutation runs through validators in the store layer, so malformed input fails fast with a clear error rather than being silently normalised or stored as garbage. Rules an agent should know:
+
+- **No control characters** anywhere. Single-line fields (titles, slugs, names, filenames, URLs, tags) reject all C0 controls and DEL (`\x00–\x1F`, `\x7F`). Multi-line fields (descriptions, comment bodies, document content) allow `\t \n \r` but reject the rest.
+- **No silent trimming on identifiers.** Leading or trailing whitespace in a `filename`, `slug`, or URL is rejected — if you fat-finger a payload you'll see it instead of having it normalised away.
+- **Length caps:** title 200 chars, name/assignee/`--user` 80, slug 60, filename 200, tag 80, PR URL 2 KiB, body fields 1 MiB. Generous for legitimate content, tight enough to fail loud on a runaway paste.
+- **Slugs must be kebab-case** matching `^[a-z0-9][a-z0-9-]*$`. Auto-derived slugs (when you omit `slug` on `feature.add`) always satisfy this; explicit slugs in JSON must too.
+- **PR URLs** must use `http` or `https` and have a host. `javascript:` and similar exotic schemes are rejected.
+- **`--user` is validated once per command.** A `--user` that contains a newline or a control character is rejected at the start of the command before any work happens.
+- **Strict JSON decode.** Unknown fields fail (covered by principle #1). Combined with the above, an agent that sends garbage gets a useful error pointing at the bad field rather than a successful write of corrupted data.
+
 ## Command reference
 
 Every command supports `-o text|json` and `--db <path>` as global flags. Examples below omit them unless relevant.

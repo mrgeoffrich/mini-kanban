@@ -25,6 +25,9 @@ func NewRoot() *cobra.Command {
 		Short:         "mini-kanban: a local-first issue tracker, CLI-first",
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			return validateActorFlag()
+		},
 	}
 	root.PersistentFlags().VarP(newOutputFlag(&opts.output), "output", "o", "output format: text|json")
 	root.PersistentFlags().StringVar(&opts.dbPath, "db", "", "override database path (default: ~/.mini-kanban/db.sqlite)")

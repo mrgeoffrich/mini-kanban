@@ -12,6 +12,10 @@ import (
 var ErrPRAlreadyAttached = errors.New("PR already attached to this issue")
 
 func (s *Store) AttachPR(issueID int64, url string) (*model.PullRequest, error) {
+	url, err := ValidatePRURLStrict(url)
+	if err != nil {
+		return nil, err
+	}
 	res, err := s.DB.Exec(`INSERT INTO issue_pull_requests (issue_id, url) VALUES (?, ?)`, issueID, url)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {

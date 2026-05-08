@@ -26,6 +26,18 @@ func Slugify(s string) string {
 }
 
 func (s *Store) CreateFeature(repoID int64, slug, title, description string) (*model.Feature, error) {
+	slug, err := ValidateSlug(slug)
+	if err != nil {
+		return nil, err
+	}
+	title, err = ValidateTitle(title, "title")
+	if err != nil {
+		return nil, err
+	}
+	description, err = ValidateBody(description, "description", false)
+	if err != nil {
+		return nil, err
+	}
 	res, err := s.DB.Exec(
 		`INSERT INTO features (repo_id, slug, title, description) VALUES (?, ?, ?, ?)`,
 		repoID, slug, title, description,
@@ -73,12 +85,20 @@ func (s *Store) UpdateFeature(id int64, title, description *string) error {
 	sets := []string{}
 	args := []any{}
 	if title != nil {
+		clean, err := ValidateTitle(*title, "title")
+		if err != nil {
+			return err
+		}
 		sets = append(sets, "title = ?")
-		args = append(args, *title)
+		args = append(args, clean)
 	}
 	if description != nil {
+		clean, err := ValidateBody(*description, "description", false)
+		if err != nil {
+			return err
+		}
 		sets = append(sets, "description = ?")
-		args = append(args, *description)
+		args = append(args, clean)
 	}
 	if len(sets) == 0 {
 		return nil

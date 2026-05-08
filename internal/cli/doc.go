@@ -16,24 +16,20 @@ import (
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
 
-var (
-	docFilenameRe = regexp.MustCompile(`^[^/\\\x00]+$`)
-	issueKeyShape = regexp.MustCompile(`^[A-Za-z0-9]{4}-\d+$`)
-)
+var issueKeyShape = regexp.MustCompile(`^[A-Za-z0-9]{4}-\d+$`)
 
 // isIssueKey reports whether s has the PREFIX-N shape, used to disambiguate
 // "issue or feature?" positionals on commands like `mk doc link`.
 func isIssueKey(s string) bool { return issueKeyShape.MatchString(s) }
 
+// validateDocFilename runs the strict store-layer validator. Kept as a
+// CLI-side wrapper so every entry point (positional flag path, JSON path,
+// rename) goes through the same rules and surfaces errors at parse time
+// instead of waiting for the SQL write. No silent trimming — leading or
+// trailing whitespace is a hard error so an agent that fat-fingered a
+// payload sees the problem instead of having it normalised away.
 func validateDocFilename(name string) (string, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "", fmt.Errorf("filename is required")
-	}
-	if !docFilenameRe.MatchString(name) {
-		return "", fmt.Errorf("filename must not contain '/', '\\\\', or NUL")
-	}
-	return name, nil
+	return store.ValidateDocFilenameStrict(name)
 }
 
 func newDocCmd() *cobra.Command {

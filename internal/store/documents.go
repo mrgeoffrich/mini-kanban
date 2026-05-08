@@ -12,6 +12,14 @@ import (
 var ErrDocumentExists = errors.New("a document with that filename already exists in this repo")
 
 func (s *Store) CreateDocument(repoID int64, filename string, t model.DocumentType, content, sourcePath string) (*model.Document, error) {
+	filename, err := ValidateDocFilenameStrict(filename)
+	if err != nil {
+		return nil, err
+	}
+	content, err = ValidateBody(content, "content", false)
+	if err != nil {
+		return nil, err
+	}
 	res, err := s.DB.Exec(
 		`INSERT INTO documents (repo_id, filename, type, content, size_bytes, source_path) VALUES (?, ?, ?, ?, ?, ?)`,
 		repoID, filename, string(t), content, len(content), sourcePath,
@@ -79,8 +87,12 @@ func (s *Store) UpdateDocument(id int64, newType *model.DocumentType, newContent
 		args = append(args, string(*newType))
 	}
 	if newContent != nil {
+		clean, err := ValidateBody(*newContent, "content", false)
+		if err != nil {
+			return err
+		}
 		sets = append(sets, "content = ?", "size_bytes = ?")
-		args = append(args, *newContent, len(*newContent))
+		args = append(args, clean, len(clean))
 	}
 	if newSourcePath != nil {
 		sets = append(sets, "source_path = ?")
@@ -99,6 +111,10 @@ func (s *Store) UpdateDocument(id int64, newType *model.DocumentType, newContent
 // preserved, so document_links rows stay intact. Optionally updates the
 // type at the same time. Returns ErrDocumentExists on filename collision.
 func (s *Store) RenameDocument(id int64, newFilename string, newType *model.DocumentType) error {
+	newFilename, err := ValidateDocFilenameStrict(newFilename)
+	if err != nil {
+		return err
+	}
 	sets := []string{"filename = ?"}
 	args := []any{newFilename}
 	if newType != nil {
@@ -107,7 +123,7 @@ func (s *Store) RenameDocument(id int64, newFilename string, newType *model.Docu
 	}
 	sets = append(sets, "updated_at = CURRENT_TIMESTAMP")
 	args = append(args, id)
-	_, err := s.DB.Exec(
+	_, err = s.DB.Exec(
 		fmt.Sprintf(`UPDATE documents SET %s WHERE id = ?`, strings.Join(sets, ", ")),
 		args...,
 	)

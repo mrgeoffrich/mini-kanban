@@ -2,13 +2,13 @@ package cli
 
 import (
 	"fmt"
-	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
 
 func newPRCmd() *cobra.Command {
@@ -18,21 +18,7 @@ func newPRCmd() *cobra.Command {
 }
 
 func validatePRURL(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", fmt.Errorf("URL is required")
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "", fmt.Errorf("invalid URL: %w", err)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", fmt.Errorf("URL must use http or https scheme")
-	}
-	if u.Host == "" {
-		return "", fmt.Errorf("URL must include a host")
-	}
-	return raw, nil
+	return store.ValidatePRURLStrict(raw)
 }
 
 func prAttachCmd() *cobra.Command {
