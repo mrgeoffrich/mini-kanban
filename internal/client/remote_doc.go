@@ -31,7 +31,7 @@ func (c *remoteClient) ShowDocument(ctx context.Context, repo *model.Repo, filen
 		q.Set("with_content", "false")
 	}
 	var out DocView
-	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/documents/"+filename, q, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/documents/"+url.PathEscape(filename), q, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -47,7 +47,7 @@ func (c *remoteClient) GetDocumentRaw(ctx context.Context, repo *model.Repo, fil
 
 func (c *remoteClient) DownloadDocument(ctx context.Context, repo *model.Repo, filename string) ([]byte, error) {
 	var raw []byte
-	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/documents/"+filename+"/download", nil, nil, &raw); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/documents/"+url.PathEscape(filename)+"/download", nil, nil, &raw); err != nil {
 		return nil, err
 	}
 	return raw, nil
@@ -84,7 +84,7 @@ func (c *remoteClient) UpsertDocument(ctx context.Context, repo *model.Repo, in 
 		q.Set("dry_run", "true")
 	}
 	var out model.Document
-	if err := c.do(ctx, http.MethodPut, "/repos/"+repo.Prefix+"/documents/"+in.Filename, q, body, &out); err != nil {
+	if err := c.do(ctx, http.MethodPut, "/repos/"+repo.Prefix+"/documents/"+url.PathEscape(in.Filename), q, body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -103,7 +103,7 @@ func (c *remoteClient) EditDocument(ctx context.Context, repo *model.Repo, filen
 		q.Set("dry_run", "true")
 	}
 	var out model.Document
-	if err := c.do(ctx, http.MethodPatch, "/repos/"+repo.Prefix+"/documents/"+filename, q, body, &out); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/repos/"+repo.Prefix+"/documents/"+url.PathEscape(filename), q, body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -116,7 +116,7 @@ func (c *remoteClient) RenameDocument(ctx context.Context, repo *model.Repo, old
 		q.Set("dry_run", "true")
 	}
 	var out model.Document
-	if err := c.do(ctx, http.MethodPost, "/repos/"+repo.Prefix+"/documents/"+oldName+"/rename", q, body, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/repos/"+repo.Prefix+"/documents/"+url.PathEscape(oldName)+"/rename", q, body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -127,7 +127,7 @@ func (c *remoteClient) DeleteDocument(ctx context.Context, repo *model.Repo, fil
 		q := url.Values{}
 		q.Set("dry_run", "true")
 		var preview DocumentDeletePreview
-		if err := c.do(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/documents/"+filename, q, nil, &preview); err != nil {
+		if err := c.do(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/documents/"+url.PathEscape(filename), q, nil, &preview); err != nil {
 			return nil, nil, err
 		}
 		return nil, &preview, nil
@@ -136,7 +136,7 @@ func (c *remoteClient) DeleteDocument(ctx context.Context, repo *model.Repo, fil
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := c.do(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/documents/"+filename, nil, nil, nil); err != nil {
+	if err := c.do(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/documents/"+url.PathEscape(filename), nil, nil, nil); err != nil {
 		return nil, nil, err
 	}
 	return doc, nil, nil
@@ -148,7 +148,7 @@ func (c *remoteClient) LinkDocument(ctx context.Context, repo *model.Repo, in in
 		q.Set("dry_run", "true")
 	}
 	var out model.DocumentLink
-	if err := c.do(ctx, http.MethodPost, "/repos/"+repo.Prefix+"/documents/"+in.Filename+"/links", q, in, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/repos/"+repo.Prefix+"/documents/"+url.PathEscape(in.Filename)+"/links", q, in, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -159,12 +159,12 @@ func (c *remoteClient) UnlinkDocument(ctx context.Context, repo *model.Repo, in 
 	if dryRun {
 		q.Set("dry_run", "true")
 		var preview DocumentUnlinkPreview
-		if err := c.doBody(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/documents/"+in.Filename+"/links", q, in, &preview); err != nil {
+		if err := c.doBody(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/documents/"+url.PathEscape(in.Filename)+"/links", q, in, &preview); err != nil {
 			return nil, 0, err
 		}
 		return &preview, 0, nil
 	}
-	if err := c.doBody(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/documents/"+in.Filename+"/links", nil, in, nil); err != nil {
+	if err := c.doBody(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/documents/"+url.PathEscape(in.Filename)+"/links", nil, in, nil); err != nil {
 		return nil, 0, err
 	}
 	return nil, 1, nil

@@ -109,7 +109,7 @@ func (c *remoteClient) UnlinkRelation(ctx context.Context, repo *model.Repo, in 
 // JSON bodies, so we can't just call c.do with in=nil.
 func (c *remoteClient) doBody(ctx context.Context, method, path string, query url.Values, in any, out any) error {
 	u := *c.base
-	u.Path = strings.TrimRight(u.Path, "/") + path
+	setURLPath(&u, path)
 	if query != nil {
 		u.RawQuery = query.Encode()
 	}

@@ -89,7 +89,7 @@ func IsNotFound(err error) bool {
 // rawSink instead of body.
 func (c *remoteClient) do(ctx context.Context, method, path string, query url.Values, in any, out any) error {
 	u := *c.base
-	u.Path = strings.TrimRight(u.Path, "/") + path
+	setURLPath(&u, path)
 	if query != nil {
 		u.RawQuery = query.Encode()
 	}
@@ -166,4 +166,20 @@ type notFoundError struct {
 }
 
 func (e *notFoundError) Unwrap() error { return store.ErrNotFound }
+
+// setURLPath sets u.Path AND u.RawPath so that callers may pre-escape path
+// segments with url.PathEscape without Go's url package double-encoding the
+// literal '%' on the way out. Path is the unescaped form (decoded for
+// callers' convenience); RawPath is the on-the-wire form. We always set
+// both to keep them consistent — Go's URL.String() honours RawPath only
+// when it is a valid encoding of Path.
+func setURLPath(u *url.URL, escaped string) {
+	full := strings.TrimRight(u.Path, "/") + escaped
+	if unescaped, err := url.PathUnescape(full); err == nil {
+		u.Path = unescaped
+		u.RawPath = full
+	} else {
+		u.Path = full
+	}
+}
 

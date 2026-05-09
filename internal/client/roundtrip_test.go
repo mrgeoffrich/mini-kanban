@@ -273,6 +273,78 @@ func TestRoundTripDryRun(t *testing.T) {
 	}
 }
 
+func TestRoundTripDocSpecialFilename(t *testing.T) {
+	// Filenames that are valid per the store's strict filename validator but
+	// require URL escaping ("with space.md", "+" reserved char, etc.) round
+	// through every doc verb on the remote backend.
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	for _, name := range []string{"with space.md", "a+b.md", "q?z.md"} {
+		t.Run(name, func(t *testing.T) {
+			doc, err := p.remote.CreateDocument(ctx, p.repo, DocCreateInput{
+				Filename: name,
+				Type:     model.DocTypeDesigns,
+				Body:     "BODY-" + name,
+			}, false)
+			if err != nil {
+				t.Fatalf("CreateDocument: %v", err)
+			}
+			if doc.Filename != name {
+				t.Fatalf("filename: got %q, want %q", doc.Filename, name)
+			}
+
+			view, err := p.remote.ShowDocument(ctx, p.repo, name, true)
+			if err != nil {
+				t.Fatalf("ShowDocument: %v", err)
+			}
+			if view.Document.Filename != name {
+				t.Fatalf("show filename: %q", view.Document.Filename)
+			}
+
+			body, err := p.remote.DownloadDocument(ctx, p.repo, name)
+			if err != nil {
+				t.Fatalf("DownloadDocument: %v", err)
+			}
+			if !strings.Contains(string(body), "BODY-"+name) {
+				t.Fatalf("download body: %q", string(body))
+			}
+
+			newType := "architecture"
+			if _, err := p.remote.EditDocument(ctx, p.repo, name, &newType, nil, false); err != nil {
+				t.Fatalf("EditDocument: %v", err)
+			}
+
+			iss, err := p.remote.CreateIssue(ctx, p.repo, inputs.IssueAddInput{
+				Title: "for-link", State: "todo",
+			}, false)
+			if err != nil {
+				t.Fatalf("CreateIssue: %v", err)
+			}
+			if _, err := p.remote.LinkDocument(ctx, p.repo, inputs.DocLinkInput{
+				Filename: name, IssueKey: iss.Key,
+			}, false); err != nil {
+				t.Fatalf("LinkDocument: %v", err)
+			}
+			if _, _, err := p.remote.UnlinkDocument(ctx, p.repo, inputs.DocUnlinkInput{
+				Filename: name, IssueKey: iss.Key,
+			}, false); err != nil {
+				t.Fatalf("UnlinkDocument: %v", err)
+			}
+
+			renamed := "renamed-" + name
+			if _, err := p.remote.RenameDocument(ctx, p.repo, name, renamed, "", false); err != nil {
+				t.Fatalf("RenameDocument: %v", err)
+			}
+
+			if _, _, err := p.remote.DeleteDocument(ctx, p.repo, renamed, false); err != nil {
+				t.Fatalf("DeleteDocument: %v", err)
+			}
+		})
+	}
+}
+
 func TestRoundTripNotFoundError(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()
