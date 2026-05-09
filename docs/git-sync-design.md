@@ -440,11 +440,22 @@ A single `mk sync` should produce **at most one commit**. Partial failure
 should not leave a half-staged tree — easiest path is to stage everything
 in a temp working area and only `git add` on full success.
 
-`mk sync` should be process-locked: only one `mk sync` runs against a
-given DB at a time, and concurrent `mk issue create` (etc.) calls block
-on a short advisory lock for the duration of the sync. Otherwise an
-in-flight create can allocate a `next_issue_number` that import is
-about to assign to a remote uuid.
+`mk sync` is process-locked at the file-lock level: only one `mk sync`
+runs against a given DB at a time. **Shipped:** the lock guards
+sync-vs-sync only; other commands (`mk issue create` etc.) do not
+acquire it, so a `mk issue create` racing with a `mk sync` mid-renumber
+on the same DB can in principle allocate a `next_issue_number` that
+import is about to reassign. SQLite's row-level locking on the `repos`
+row provides partial protection (one transaction blocks the other),
+but the post-allocation collision case is not fully serialised.
+
+In practice this is narrow: mk is single-user-typical and `mk sync` is
+deliberately invoked, so the race window requires concurrent shells.
+Extending the lock to cross-command guard would mean every mutating
+CLI command briefly try-acquires the lock; that's a meaningful surface
+to plumb and is left as a follow-up. If it bites in real use, the fix
+is contained — the lock primitive already exists in
+`internal/sync/lock.go`.
 
 ### Whole-repo sync
 
