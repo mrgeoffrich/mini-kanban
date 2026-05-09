@@ -13,7 +13,7 @@ This document captures the **takeaways only**. Each principle gets a separate fo
 | 3 | Context-window discipline | Shipped — lean list outputs, opt-in heavy fields |
 | 4 | Defensive input validation | Shipped — store-layer validators, control-char rejection |
 | 5 | Dry-run mode for mutations | Shipped — global `--dry-run` flag |
-| 6 | Agent-specific documentation | Partially in place — `SKILL.md` is the agent-facing reference; revisit in light of #5 |
+| 6 | Agent-specific documentation | Shipped — `SKILL.md` reorganised around the agent flow |
 | 7 | Multi-surface architecture (MCP) | Pending — currently CLI-only |
 | 8 | Response sanitization | Pending |
 | 9 | Incremental implementation | Ongoing — already how we're doing it |
@@ -565,3 +565,24 @@ if opts.dryRun {
 - **No projection of `created_at` / `updated_at`.** These are server-time DB defaults; the dry-run just leaves them zero. The shape is otherwise faithful to the real call.
 - **No simulation of `mk issue next` claim.** That command's whole purpose is the atomic claim — the read-only counterpart `mk issue peek` already exists for the "what would I claim?" question. `--dry-run` on `mk issue next` is therefore equivalent to `mk issue peek` and is wired up that way.
 - **No history entry.** The audit log is for actual mutations; a dry-run leaves no trace.
+
+---
+
+## Principle #6 — Agent-specific documentation
+
+**Status:** Shipped (light pass).
+
+**Decision:** keep `SKILL.md` as the single agent-facing reference; reorganise it so the five preceding principles compose into one coherent flow rather than living in five separate sections.
+
+### What changed
+
+- New "Agent quick start" near the top that ties the principles together as a five-step cheat-sheet: discover (schema) → compose (`--json`) → rehearse (`--dry-run`) → execute (with `--user`) → query lean. A worked end-to-end example follows.
+- "Common workflows" examples rewritten to lead with the JSON path. The flag/positional surface is mentioned once, as the human-friendly alternative.
+- "Gotchas" tightened: `--user` is now called out alongside the comment-author rule; the "long text via files only" advice — which predates principle #1 — is replaced with the JSON-path reality (just inline the string). New gotchas added for canonical-only issue keys in JSON and the `--json` / positional mutual exclusion.
+- The frontmatter description is unchanged. It already triggers on the right keywords (issues, kanban, tags, blocks, PRs, audit log).
+
+### What we deliberately don't do
+
+- **No second skill file.** A `mk-agent.md` separate from `SKILL.md` would split the source of truth. Better to organise one doc well.
+- **No auto-generated reference.** `mk schema` is the runtime auto-doc; SKILL.md is the prose. Keeping them separate keeps the maintenance burden honest.
+- **No examples beyond the worked end-to-end one.** Agents already have `mk schema show <command> | jq .examples[0]` on tap; padding the doc with more would just bloat it.

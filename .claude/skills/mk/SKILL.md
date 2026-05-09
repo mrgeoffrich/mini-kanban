@@ -5,7 +5,35 @@ description: Use this skill whenever you need to create, read, update, or organi
 
 # Working with `mk` (mini-kanban)
 
-`mk` is a local CLI issue tracker. Everything lives in a single SQLite db at `~/.mini-kanban/db.sqlite`. It's designed to be driven non-interactively by AI agents — every read command supports JSON output, and every long-text input is supplied via a file or stdin.
+`mk` is a local CLI issue tracker. Everything lives in a single SQLite db at `~/.mini-kanban/db.sqlite`. It's designed to be driven non-interactively by AI agents — every read command supports JSON output, every mutation accepts a JSON payload via `--json`, and every payload shape is published at runtime via `mk schema`.
+
+## Agent quick start
+
+The five conventions below combine into one straightforward flow. Each is documented in detail further down; this section is the cheat-sheet:
+
+1. **Discover the shape:** `mk schema show <command>` (or `mk schema all` for one-shot ingestion). Worked examples are in every schema's `examples[0]`.
+2. **Compose the payload as JSON.** Every mutating command accepts `--json '<payload>'`, `--json -` (stdin), or `--json @path/to.json`. Long text (descriptions, comment bodies, doc content) goes inline as a string.
+3. **Rehearse with `--dry-run`** if the call is destructive or non-trivial. Stdout has the same shape as a real call; stderr emits `[dry-run] no changes were written`. Especially useful before `mk issue rm` / `feature rm` / `doc rm`, where the dry-run reports cascade counts.
+4. **Run for real** without `--dry-run`. **Always pass `--user <agent-name>`** so the audit log attributes work correctly.
+5. **Query lean by default.** `mk issue list -o json` and `mk feature list -o json` strip the heavy `description` field; pass `--with-description` if you actually need bodies. `mk doc show --metadata` skips the body. `mk issue brief --no-doc-content` gives you the structure without inlining linked-doc bodies.
+
+A worked example, end to end:
+
+```bash
+# 1. Discover.
+mk schema show issue.add | jq .examples[0]
+
+# 2. Compose & rehearse.
+mk issue add --user agent-claude --dry-run --json '{
+  "title": "Pin tab strip",
+  "feature_slug": "tui-polish",
+  "description": "Body height should clip the tab strip.",
+  "tags": ["ui", "tui"]
+}' -o json
+
+# 3. Commit (drop --dry-run).
+mk issue add --user agent-claude --json '{ ...same payload... }' -o json
+```
 
 ## Mental model
 
@@ -464,32 +492,28 @@ mk pr list <KEY>                     One URL per line (or JSON)
 mk pr attach MINI-42 https://github.com/owner/repo/pull/7
 ```
 
-## Common workflows
+## Common workflows (JSON path — agent-preferred)
 
 **File a bug with repro steps:**
 ```bash
-cat <<'EOF' > /tmp/repro.md
-## Repro
-1. POST /login with valid creds
-2. Server returns 500
-
-## Logs
-NullPointerException at AuthFilter.java:42
-EOF
-mk issue add "Login returns 500" --description-file /tmp/repro.md --state todo
+mk issue add --user agent-claude --json '{
+  "title": "Login returns 500",
+  "state": "todo",
+  "description": "## Repro\n1. POST /login with valid creds\n2. Server returns 500\n\n## Logs\nNullPointerException at AuthFilter.java:42"
+}'
 ```
 
 **Pick up an issue and link the PR:**
 ```bash
-mk issue state MINI-42 in_progress
-mk comment add MINI-42 --as Claude --body "Picking this up."
-mk pr attach MINI-42 https://github.com/owner/repo/pull/123
+mk issue state   --user agent-claude --json '{"key":"MINI-42","state":"in_progress"}'
+mk comment add   --user agent-claude --json '{"issue_key":"MINI-42","author":"Claude","body":"Picking this up."}'
+mk pr attach     --user agent-claude --json '{"issue_key":"MINI-42","url":"https://github.com/owner/repo/pull/123"}'
 ```
 
 **Mark blocked work:**
 ```bash
-mk link MINI-42 blocks MINI-43
-mk issue show MINI-43          # MINI-43 will show "blocks by MINI-42" in relations
+mk link --user agent-claude --json '{"from":"MINI-42","type":"blocks","to":"MINI-43"}'
+mk issue show MINI-43          # MINI-43 will show "blocked by MINI-42" in relations
 ```
 
 **Find what's in flight across all repos:**
@@ -497,12 +521,23 @@ mk issue show MINI-43          # MINI-43 will show "blocks by MINI-42" in relati
 mk issue list --all-repos --state in_progress,in_review -o json
 ```
 
+**Preview a destructive change before committing:**
+```bash
+mk issue rm --user agent-claude --dry-run --json '{"key":"MINI-99"}' -o json
+# Inspect cascade counts in the output, then re-run without --dry-run.
+```
+
+The same workflows are available via the older flag/positional surface for human use (`mk issue add "Login returns 500" --state todo --description-file /tmp/repro.md`). Agents should prefer the JSON path because it's strict, schema-published, and dry-runnable.
+
 ## Gotchas
 
 - **Never run `mk` outside a git repo** when a command needs the current repo — it hard-errors with "not inside a git repository". `cd` first.
-- **Comment author is required.** Forgetting `--as <name>` is the most common mistake.
-- **Long text via files only.** `mk issue add "Fix" --description "two\nlines"` does not interpret `\n`. Use `--description -` with a heredoc, or `--description-file`.
-- **State values** can be written as `in-progress`, `in progress`, or `in_progress` — but parsing is case-sensitive on the lowercase form.
+- **Comment author is required.** On the JSON path the field is `author`; on the flag path it's `--as <name>`. Forgetting it is the most common mistake.
+- **`--user` is required for agents.** It controls the actor field in the audit log; without it every action looks like the OS user. The flag is permissive (no rejection if omitted) so this is on you to pass consistently.
+- **Long text in JSON is just a string.** `description`, `body`, `content` etc. take inline strings — no `\n` translation magic, JSON's own `\n` escapes work as expected. The flag path's `--description-file` is unnecessary here.
+- **Issue keys in JSON must be canonical** (`MINI-42`). The bare-number shortcut (`42`) is for humans on the flag path; agents driving JSON should always pass the prefix.
+- **Mixing `--json` with positionals/flags is rejected.** Choose one mode per call.
+- **State values** accept `in-progress`, `in progress`, or `in_progress` — but parsing is case-sensitive on the lowercase form.
 - **Auto-created prefix can collide.** If two repos share a basename, `mk init` allocates `XXX2`, `XXX3`, etc. Use `mk repo list` to confirm what was assigned.
 - **Issue numbers never repeat.** Deleting `MINI-3` does not free up the number — the next issue is still `MINI-4`.
 - **JSON output is the contract.** When parsing programmatically, always pass `-o json`. Text output is for humans and may shift.
