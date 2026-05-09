@@ -12,6 +12,7 @@ A local-first, single-binary issue tracker designed to be driven equally well by
 - **`mk issue brief <KEY>`** — bulk-context JSON: issue + parent feature + all linked doc bodies + comments + relations + PRs, in one read. Designed to be piped straight into an LLM prompt.
 - **TUI (`mk tui`)** — bubbletea-based full-screen kanban for human review.
 - **Audit log** — every mutation is recorded with an actor name (`--user <name>`); 60-day retention.
+- **REST API (`mk api`)** — same operations over HTTP for non-shell callers (web UIs, IDE plugins, long-running agents).
 
 ## Install
 
@@ -35,6 +36,7 @@ mk init                     # binds the cwd to a 4-letter prefix derived from th
 mk issue add "Login broken on Safari" --description-file /tmp/repro.md --tag bug
 mk issue list
 mk tui                      # interactive board
+mk api                      # local REST API on 127.0.0.1:5320 (same DB)
 ```
 
 To file work on behalf of an AI agent, always pass `--user <agent-name>` so audits attribute correctly:
@@ -92,6 +94,8 @@ mk install-skill
 ```
 
 This writes `.claude/skills/mk/SKILL.md` so Claude Code's project-skill auto-discovery picks it up. Re-run after upgrading `mk` to refresh the docs.
+
+The skill at `.claude/skills/mk/SKILL.md` documents both the CLI and HTTP API surfaces; agents discover endpoints at runtime via `GET /schema` (mirrors `mk schema all`) and use `?dry_run=true` + `X-Actor: <name>` to rehearse and attribute work.
 
 For one-shot LLM context on a single issue:
 
