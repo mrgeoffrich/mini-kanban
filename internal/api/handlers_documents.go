@@ -498,6 +498,167 @@ func buildDocumentDeletePreview(s *store.Store, doc *model.Document) (*DocumentD
 	}, nil
 }
 
+func (d deps) handleDocumentLink(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	doc, ok := resolveDocumentOnRepo(w, r, d.store, repo, false)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[inputs.DocLinkInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	in.Filename = doc.Filename // URL wins
+	target, ref, status, code, msg, field := resolveDocLinkTarget(d.store, repo, in.IssueKey, in.FeatureSlug)
+	if msg != "" {
+		writeError(w, status, code, msg, fieldDetail(field))
+		return
+	}
+	if isDryRun(r) {
+		preview := &model.DocumentLink{
+			DocumentID:       doc.ID,
+			DocumentFilename: doc.Filename,
+			DocumentType:     doc.Type,
+			Description:      in.Description,
+			IssueID:          target.IssueID,
+			FeatureID:        target.FeatureID,
+		}
+		writeDryRun(w, http.StatusCreated, preview)
+		return
+	}
+	link, err := d.store.LinkDocument(doc.ID, target, in.Description)
+	if err != nil {
+		s, c := statusForError(err)
+		writeError(w, s, c, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Actor:    ActorFromContext(r.Context()),
+		Op:       "document.link",
+		Kind:     "document",
+		TargetID: &doc.ID, TargetLabel: doc.Filename,
+		Details: "→ " + ref,
+	})
+	writeJSON(w, http.StatusCreated, link)
+}
+
+func (d deps) handleDocumentUnlink(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	doc, ok := resolveDocumentOnRepo(w, r, d.store, repo, false)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[inputs.DocUnlinkInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	in.Filename = doc.Filename
+	target, ref, status, code, msg, field := resolveDocLinkTarget(d.store, repo, in.IssueKey, in.FeatureSlug)
+	if msg != "" {
+		writeError(w, status, code, msg, fieldDetail(field))
+		return
+	}
+	if isDryRun(r) {
+		links, err := d.store.ListDocumentLinks(doc.ID)
+		if err != nil {
+			s, c := statusForError(err)
+			writeError(w, s, c, err.Error(), nil)
+			return
+		}
+		matched := 0
+		for _, l := range links {
+			if target.IssueID != nil && l.IssueID != nil && *l.IssueID == *target.IssueID {
+				matched++
+			}
+			if target.FeatureID != nil && l.FeatureID != nil && *l.FeatureID == *target.FeatureID {
+				matched++
+			}
+		}
+		writeDryRun(w, http.StatusOK, &DocumentUnlinkPreview{
+			Filename:    doc.Filename,
+			Target:      ref,
+			WouldRemove: matched,
+		})
+		return
+	}
+	n, err := d.store.UnlinkDocument(doc.ID, target)
+	if err != nil {
+		s, c := statusForError(err)
+		writeError(w, s, c, err.Error(), nil)
+		return
+	}
+	if n > 0 {
+		recordOp(d.store, d.logger, model.HistoryEntry{
+			RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+			Actor:    ActorFromContext(r.Context()),
+			Op:       "document.unlink",
+			Kind:     "document",
+			TargetID: &doc.ID, TargetLabel: doc.Filename,
+			Details: "↛ " + ref,
+		})
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// resolveDocLinkTarget validates that exactly one of issue_key/feature_slug
+// is provided and resolves it within repo. Returns the resolved LinkTarget,
+// the human-readable label used in audit details, and an HTTP error tuple
+// (status/code/msg/field). msg is non-empty on failure.
+func resolveDocLinkTarget(s *store.Store, repo *model.Repo, issueKey, featureSlug string) (store.LinkTarget, string, int, string, string, string) {
+	switch {
+	case issueKey != "" && featureSlug != "":
+		return store.LinkTarget{}, "", http.StatusBadRequest, "invalid_input",
+			"provide issue_key OR feature_slug, not both", ""
+	case issueKey == "" && featureSlug == "":
+		return store.LinkTarget{}, "", http.StatusBadRequest, "invalid_input",
+			"issue_key or feature_slug is required", ""
+	case issueKey != "":
+		prefix, num, err := store.ParseIssueKey(issueKey)
+		if err != nil {
+			return store.LinkTarget{}, "", http.StatusBadRequest, "invalid_input", err.Error(), "issue_key"
+		}
+		iss, err := s.GetIssueByKey(prefix, num)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return store.LinkTarget{}, "", http.StatusNotFound, "not_found", err.Error(), "issue_key"
+			}
+			st, c := statusForError(err)
+			return store.LinkTarget{}, "", st, c, err.Error(), "issue_key"
+		}
+		if iss.RepoID != repo.ID {
+			return store.LinkTarget{}, "", http.StatusNotFound, "not_found", "issue not in this repo", "issue_key"
+		}
+		return store.LinkTarget{IssueID: &iss.ID}, iss.Key, 0, "", "", ""
+	default:
+		feat, err := s.GetFeatureBySlug(repo.ID, featureSlug)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				return store.LinkTarget{}, "", http.StatusNotFound, "not_found", err.Error(), "feature_slug"
+			}
+			st, c := statusForError(err)
+			return store.LinkTarget{}, "", st, c, err.Error(), "feature_slug"
+		}
+		return store.LinkTarget{FeatureID: &feat.ID}, "feature/" + feat.Slug, 0, "", "", ""
+	}
+}
+
 // resolvedDocCreate is the validated tuple that document create/upsert
 // hand off to the store.
 type resolvedDocCreate struct {

@@ -478,6 +478,137 @@ func TestDocumentRenameCollision(t *testing.T) {
 	}
 }
 
+func TestDocumentLinkIssueHappy(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "B")
+	iss := seedIssue(t, s, repo, "i")
+	body := map[string]any{"issue_key": iss.Key, "description": "context"}
+	resp, raw := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md/links", body)
+	if resp.StatusCode != 201 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
+	}
+	assertHistoryOps(t, s, []string{"document.link"})
+}
+
+func TestDocumentLinkFeatureHappy(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "B")
+	feat := seedFeature(t, s, repo, "auth", "Auth")
+	body := map[string]any{"feature_slug": feat.Slug}
+	resp, _ := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md/links", body)
+	if resp.StatusCode != 201 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestDocumentLinkBothOmitted(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "B")
+	resp, _ := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md/links", map[string]any{})
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestDocumentLinkBothSupplied(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "B")
+	iss := seedIssue(t, s, repo, "i")
+	feat := seedFeature(t, s, repo, "auth", "Auth")
+	body := map[string]any{"issue_key": iss.Key, "feature_slug": feat.Slug}
+	resp, _ := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md/links", body)
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestDocumentLinkUnknownIssue(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "B")
+	body := map[string]any{"issue_key": "MINI-999"}
+	resp, _ := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md/links", body)
+	if resp.StatusCode != 404 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestDocumentLinkUnknownFeature(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "B")
+	body := map[string]any{"feature_slug": "nope"}
+	resp, _ := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md/links", body)
+	if resp.StatusCode != 404 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestDocumentLinkDryRun(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	doc := seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "B")
+	iss := seedIssue(t, s, repo, "i")
+	body := map[string]any{"issue_key": iss.Key}
+	resp, _ := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md/links?dry_run=true", body)
+	if resp.StatusCode != 201 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	links, _ := s.ListDocumentLinks(doc.ID)
+	if len(links) != 0 {
+		t.Fatalf("dry-run mutated: %d", len(links))
+	}
+}
+
+func TestDocumentUnlinkHappy(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	doc := seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "B")
+	iss := seedIssue(t, s, repo, "i")
+	if _, err := s.LinkDocument(doc.ID, store.LinkTarget{IssueID: &iss.ID}, ""); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+	body := map[string]any{"issue_key": iss.Key}
+	resp, _ := apiDelete(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md/links", body)
+	if resp.StatusCode != 204 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	rows, _ := s.ListHistory(store.HistoryFilter{})
+	if len(rows) != 1 || rows[0].Op != "document.unlink" {
+		t.Fatalf("history: %+v", rows)
+	}
+}
+
+func TestDocumentUnlinkAbsentNoAudit(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "B")
+	iss := seedIssue(t, s, repo, "i")
+	body := map[string]any{"issue_key": iss.Key}
+	resp, _ := apiDelete(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md/links", body)
+	if resp.StatusCode != 204 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	rows, _ := s.ListHistory(store.HistoryFilter{})
+	if len(rows) != 0 {
+		t.Fatalf("idempotent unlink wrote audit: %d", len(rows))
+	}
+}
+
+func TestDocumentUnlinkBothOmitted(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "B")
+	resp, _ := apiDelete(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md/links", map[string]any{})
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
 func TestDocumentDeleteHappy(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
