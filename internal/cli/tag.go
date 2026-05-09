@@ -103,6 +103,11 @@ func mutateTags(key string, rawTags []string, add, strict bool) error {
 	if err != nil {
 		return err
 	}
+	if opts.dryRun {
+		projected := *iss
+		projected.Tags = projectTags(iss.Tags, tags, add)
+		return emitDryRun(&projected)
+	}
 	op := "tag.add"
 	if add {
 		err = s.AddTagsToIssue(iss.ID, tags)
@@ -124,4 +129,39 @@ func mutateTags(key string, rawTags []string, add, strict bool) error {
 		Details: strings.Join(tags, ","),
 	})
 	return emit(updated)
+}
+
+// projectTags returns the tag set that would result from add-or-remove
+// applied to existing. Order is preserved on add (existing first, then
+// new); order is preserved on remove (existing minus the to-remove set).
+// Used only by `--dry-run` so callers can show the resulting tag list
+// without touching the database.
+func projectTags(existing, delta []string, add bool) []string {
+	have := make(map[string]struct{}, len(existing))
+	for _, t := range existing {
+		have[t] = struct{}{}
+	}
+	if add {
+		out := append([]string{}, existing...)
+		for _, t := range delta {
+			if _, ok := have[t]; ok {
+				continue
+			}
+			have[t] = struct{}{}
+			out = append(out, t)
+		}
+		return out
+	}
+	remove := make(map[string]struct{}, len(delta))
+	for _, t := range delta {
+		remove[t] = struct{}{}
+	}
+	out := make([]string, 0, len(existing))
+	for _, t := range existing {
+		if _, drop := remove[t]; drop {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }

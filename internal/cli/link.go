@@ -83,6 +83,13 @@ func createRelation(fromKey, typeStr, toKey string, strict bool) error {
 	if from.ID == to.ID {
 		return fmt.Errorf("an issue cannot be linked to itself")
 	}
+	if opts.dryRun {
+		return emitDryRun(&model.Relation{
+			FromIssue: from.Key,
+			ToIssue:   to.Key,
+			Type:      t,
+		})
+	}
 	if err := s.CreateRelation(from.ID, to.ID, t); err != nil {
 		return err
 	}
@@ -147,6 +154,31 @@ func removeRelation(aKey, bKey string, strict bool) error {
 	if err != nil {
 		return err
 	}
+	if opts.dryRun {
+		// Count relations in both directions without deleting them.
+		rels, err := s.ListIssueRelations(a.ID)
+		if err != nil {
+			return err
+		}
+		matched := 0
+		if rels != nil {
+			for _, r := range rels.Outgoing {
+				if r.ToIssue == b.Key {
+					matched++
+				}
+			}
+			for _, r := range rels.Incoming {
+				if r.FromIssue == b.Key {
+					matched++
+				}
+			}
+		}
+		return emitDryRun(&relationDeletePreview{
+			A:           a.Key,
+			B:           b.Key,
+			WouldRemove: matched,
+		})
+	}
 	n, err := s.DeleteRelation(a.ID, b.ID)
 	if err != nil {
 		return err
@@ -160,4 +192,11 @@ func removeRelation(aKey, bKey string, strict bool) error {
 		})
 	}
 	return ok("removed %d relation(s) between %s and %s", n, a.Key, b.Key)
+}
+
+// relationDeletePreview is the dry-run payload for `mk unlink`.
+type relationDeletePreview struct {
+	A           string `json:"a"`
+	B           string `json:"b"`
+	WouldRemove int    `json:"would_remove"`
 }

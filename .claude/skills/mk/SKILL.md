@@ -77,6 +77,22 @@ $ mk schema show issue.add | jq .examples[0] | mk issue add --user agent-claude 
 - **Globals stay as flags.** `--user`, `--db`, and `-o text|json` are passed as flags alongside `--json`, not inside the JSON.
 - **Strict decoding.** Unknown fields fail the call. If you get `unknown field "..."` errors, run `mk schema show <command>` to see the exact accepted shape.
 
+### `--dry-run` for safe rehearsals
+
+Every mutating command accepts a global `--dry-run` flag. When set, the command runs everything up to the SQL write — input validation, entity resolution, slug/key derivation, cascade lookups — and emits the projected result without touching the database or the audit log. A `[dry-run] no changes were written` line is written to stderr; stdout has the same shape as a real call's output, so the same parsing code works.
+
+Worth using when:
+
+- You want to rehearse an `--json` payload before committing it, especially after composing it from `mk schema show`.
+- You're about to delete something and want the cascade counts first. `mk issue rm --dry-run` returns the issue plus how many comments / relations / PR attachments / doc links would be removed alongside it; same shape on `mk feature rm --dry-run` (issues unlinked, doc links removed) and `mk doc rm --dry-run` (links removed).
+- You want to confirm a complicated `mk issue edit` patch would resolve to the right object (especially for `feature_slug: null` clears).
+
+Notes:
+
+- `mk issue next --dry-run` is equivalent to `mk issue peek` — it reports what would be claimed without flipping state.
+- `mk doc export --dry-run` reports the absolute destination path it would write to and the byte count, but doesn't create directories or files.
+- Server-time fields (`id`, `created_at`, `updated_at`) come back as zero values in dry-run output; everything else is faithful to the real call.
+
 ### Output is lean by default
 
 To keep agent context windows small, list-style commands strip heavy fields by default:

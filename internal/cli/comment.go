@@ -75,6 +75,13 @@ func addComment(key, author, body string, strict bool) error {
 	if err != nil {
 		return err
 	}
+	if opts.dryRun {
+		return emitDryRun(&model.Comment{
+			IssueID: iss.ID,
+			Author:  author,
+			Body:    body,
+		})
+	}
 	c, err := s.CreateComment(iss.ID, author, body)
 	if err != nil {
 		return err

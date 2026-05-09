@@ -164,6 +164,23 @@ func createIssue(title, featureSlug, description string, state model.State, tags
 		}
 		featureID = &f.ID
 	}
+	if opts.dryRun {
+		projected := &model.Issue{
+			RepoID:      repo.ID,
+			Number:      repo.NextIssueNumber,
+			Key:         fmt.Sprintf("%s-%d", repo.Prefix, repo.NextIssueNumber),
+			FeatureID:   featureID,
+			FeatureSlug: featureSlug,
+			Title:       title,
+			Description: description,
+			State:       state,
+			Tags:        tags,
+		}
+		if projected.Tags == nil {
+			projected.Tags = []string{}
+		}
+		return emitDryRun(projected)
+	}
 	iss, err := s.CreateIssue(repo.ID, featureID, title, description, state, tags)
 	if err != nil {
 		return err
@@ -409,6 +426,28 @@ func applyIssueEdit(s *store.Store, iss *model.Issue, tPtr, dPtr *string, fPtr *
 	if tPtr == nil && dPtr == nil && fPtr == nil {
 		return fmt.Errorf("nothing to update")
 	}
+	if opts.dryRun {
+		projected := *iss
+		if tPtr != nil {
+			projected.Title = *tPtr
+		}
+		if dPtr != nil {
+			projected.Description = *dPtr
+		}
+		if fPtr != nil {
+			projected.FeatureID = *fPtr
+			if *fPtr == nil {
+				projected.FeatureSlug = ""
+			} else {
+				feat, err := s.GetFeatureByID(**fPtr)
+				if err != nil {
+					return err
+				}
+				projected.FeatureSlug = feat.Slug
+			}
+		}
+		return emitDryRun(&projected)
+	}
 	if err := s.UpdateIssue(iss.ID, tPtr, dPtr, fPtr); err != nil {
 		return err
 	}
@@ -480,6 +519,11 @@ func setIssueState(key, stateStr string, strict bool) error {
 	iss, err := resolve(s, key)
 	if err != nil {
 		return err
+	}
+	if opts.dryRun {
+		projected := *iss
+		projected.State = st
+		return emitDryRun(&projected)
 	}
 	oldState := iss.State
 	if err := s.SetIssueState(iss.ID, st); err != nil {
@@ -744,6 +788,11 @@ func assignIssue(key, name string, strict bool) error {
 	if err != nil {
 		return err
 	}
+	if opts.dryRun {
+		projected := *iss
+		projected.Assignee = name
+		return emitDryRun(&projected)
+	}
 	old := iss.Assignee
 	if err := s.SetIssueAssignee(iss.ID, name); err != nil {
 		return err
@@ -815,6 +864,11 @@ func unassignIssue(key string, strict bool) error {
 	}
 	if iss.Assignee == "" {
 		return emit(iss)
+	}
+	if opts.dryRun {
+		projected := *iss
+		projected.Assignee = ""
+		return emitDryRun(&projected)
 	}
 	old := iss.Assignee
 	if err := s.SetIssueAssignee(iss.ID, ""); err != nil {
@@ -900,6 +954,15 @@ func claimNextIssue(featureSlug string) error {
 	feat, err := s.GetFeatureBySlug(repo.ID, featureSlug)
 	if err != nil {
 		return fmt.Errorf("feature %q: %w", featureSlug, err)
+	}
+	if opts.dryRun {
+		// Equivalent to `mk issue peek`: report what would be claimed
+		// without flipping state or stamping the assignee.
+		iss, err := s.PeekNextIssue(repo.ID, feat.ID)
+		if err != nil {
+			return err
+		}
+		return emitDryRun(&claimResult{Issue: iss})
 	}
 	who := actor()
 	iss, err := s.ClaimNextIssue(repo.ID, feat.ID, who)
@@ -1005,6 +1068,13 @@ func removeIssue(key string, strict bool) error {
 	if err != nil {
 		return err
 	}
+	if opts.dryRun {
+		preview, err := previewIssueDelete(s, iss)
+		if err != nil {
+			return err
+		}
+		return emitDryRun(preview)
+	}
 	if err := s.DeleteIssue(iss.ID); err != nil {
 		return err
 	}
@@ -1015,4 +1085,58 @@ func removeIssue(key string, strict bool) error {
 		Details: iss.Title,
 	})
 	return ok("issue %s deleted", iss.Key)
+}
+
+// issueDeletePreview is the dry-run payload for `mk issue rm`. It records
+// the row that would be deleted plus how many dependent rows would be
+// cascade-removed alongside it.
+type issueDeletePreview struct {
+	Issue          *model.Issue `json:"issue"`
+	Cascade        cascadeCount `json:"cascade"`
+	WouldDelete    bool         `json:"would_delete"`
+}
+
+// cascadeCount summarises how many dependent rows ride along with a
+// destructive operation. Zeros are kept (not omitempty) so the JSON shape
+// is stable for downstream parsers.
+type cascadeCount struct {
+	Comments      int `json:"comments"`
+	Relations     int `json:"relations"`
+	PullRequests  int `json:"pull_requests"`
+	DocumentLinks int `json:"document_links"`
+	Tags          int `json:"tags"`
+}
+
+func previewIssueDelete(s *store.Store, iss *model.Issue) (*issueDeletePreview, error) {
+	comments, err := s.ListComments(iss.ID)
+	if err != nil {
+		return nil, err
+	}
+	relations, err := s.ListIssueRelations(iss.ID)
+	if err != nil {
+		return nil, err
+	}
+	prs, err := s.ListPRs(iss.ID)
+	if err != nil {
+		return nil, err
+	}
+	docs, err := s.ListDocumentsLinkedToIssue(iss.ID)
+	if err != nil {
+		return nil, err
+	}
+	relCount := 0
+	if relations != nil {
+		relCount = len(relations.Outgoing) + len(relations.Incoming)
+	}
+	return &issueDeletePreview{
+		Issue:       iss,
+		WouldDelete: true,
+		Cascade: cascadeCount{
+			Comments:      len(comments),
+			Relations:     relCount,
+			PullRequests:  len(prs),
+			DocumentLinks: len(docs),
+			Tags:          len(iss.Tags),
+		},
+	}, nil
 }

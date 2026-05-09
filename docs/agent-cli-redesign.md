@@ -12,7 +12,7 @@ This document captures the **takeaways only**. Each principle gets a separate fo
 | 2 | Runtime schema introspection | Shipped — `mk schema list / show / all` |
 | 3 | Context-window discipline | Shipped — lean list outputs, opt-in heavy fields |
 | 4 | Defensive input validation | Shipped — store-layer validators, control-char rejection |
-| 5 | Dry-run mode for mutations | Pending |
+| 5 | Dry-run mode for mutations | Shipped — global `--dry-run` flag |
 | 6 | Agent-specific documentation | Partially in place — `SKILL.md` is the agent-facing reference; revisit in light of #5 |
 | 7 | Multi-surface architecture (MCP) | Pending — currently CLI-only |
 | 8 | Response sanitization | Pending |
@@ -517,3 +517,51 @@ The "reject control chars" rule is:
 - **HTML/markdown sanitisation.** mk doesn't render HTML; markdown is rendered by glamour in the TUI which is its own escape boundary.
 - **Output sanitisation.** Principle #8 territory; separate pass.
 - **Idempotency keys / replay protection.** No remote API, no concurrent writers worth worrying about.
+
+---
+
+## Principle #5 — Dry-run mode for mutations
+
+**Decision:** add a global `--dry-run` flag to every mutating command. When set, the command runs everything up to the SQL write — input validation, entity resolution, slug/key derivation — and emits the projected result without touching the database or the audit log.
+
+### What "the projected result" means
+
+For each mutation, `--dry-run` emits the same shape that the real call would, computed in memory:
+
+| Command | Projected result |
+| --- | --- |
+| `mk issue add` | the issue that *would* be created, with the next allocated key |
+| `mk issue edit` | the current issue with the patch applied in-memory |
+| `mk issue state` / `assign` / `unassign` | issue with the field changed |
+| `mk issue rm` | the issue *plus* counts of cascade-deleted rows (comments, relations, PR attachments, doc links) |
+| `mk feature add` / `edit` / `rm` | analogous to the issue versions |
+| `mk comment add` | the projected comment row |
+| `mk link` / `unlink` / `pr.attach` / `pr.detach` / `doc.link` / `doc.unlink` | a small descriptor of the relation/link change |
+| `mk tag add` / `rm` | the projected resulting tag set |
+| `mk doc add` / `upsert` / `edit` / `rename` / `rm` | the doc as it would look after the call (or, for `rm`, a delete descriptor with link counts) |
+
+### Why this implementation, not "wrap in a transaction and rollback"
+
+The cleanest implementation of dry-run in the abstract is "BEGIN; mutate; ROLLBACK". For mk it would mean either threading a `*sql.Tx` through every store function (~20 signatures) or making `Store` polymorphic over `*sql.DB`/`*sql.Tx`. Both are invasive. The "compute the projected result in memory" approach has obvious downsides — every command grows a small chunk of bespoke code — but each chunk is short (~10 lines) and lives next to the real path it mirrors.
+
+The article's framing is "let agents validate before write". For mk the win comes from running the validators (#4) and the entity lookups, which is exactly what we already do before the SQL write. We just stop there when `--dry-run` is set.
+
+### Where dry-run runs
+
+Mutations are funnelled through small runner functions added in #1 (`createIssue`, `applyIssueEdit`, `setIssueState`, `removeIssue`, etc.). The dry-run branch goes immediately after all validators and lookups have succeeded but before the store mutation:
+
+```go
+if opts.dryRun {
+    return emitDryRun(projectedEntity)
+}
+// ...real store mutation...
+```
+
+`emitDryRun` writes a `[dry-run]` line to stderr and emits the projected entity to stdout in whatever format `--output` selects. Stderr is the signal an agent can grep for; stdout matches the real call's shape so the same parser works.
+
+### What `--dry-run` deliberately doesn't do
+
+- **No transaction wrapping.** See above.
+- **No projection of `created_at` / `updated_at`.** These are server-time DB defaults; the dry-run just leaves them zero. The shape is otherwise faithful to the real call.
+- **No simulation of `mk issue next` claim.** That command's whole purpose is the atomic claim — the read-only counterpart `mk issue peek` already exists for the "what would I claim?" question. `--dry-run` on `mk issue next` is therefore equivalent to `mk issue peek` and is wired up that way.
+- **No history entry.** The audit log is for actual mutations; a dry-run leaves no trace.

@@ -284,6 +284,15 @@ func createDocument(in *docInputs) error {
 	if err != nil {
 		return err
 	}
+	if opts.dryRun {
+		return emitDryRun(&model.Document{
+			RepoID:     repo.ID,
+			Filename:   in.Filename,
+			Type:       in.Type,
+			SizeBytes:  int64(len(in.Body)),
+			SourcePath: in.SourcePath,
+		})
+	}
 	d, err := s.CreateDocument(repo.ID, in.Filename, in.Type, in.Body, in.SourcePath)
 	if err != nil {
 		return err
@@ -359,6 +368,15 @@ func upsertDocument(in *docInputs) error {
 	}
 	existing, err := s.GetDocumentByFilename(repo.ID, in.Filename, false)
 	if errors.Is(err, store.ErrNotFound) {
+		if opts.dryRun {
+			return emitDryRun(&model.Document{
+				RepoID:     repo.ID,
+				Filename:   in.Filename,
+				Type:       in.Type,
+				SizeBytes:  int64(len(in.Body)),
+				SourcePath: in.SourcePath,
+			})
+		}
 		d, err := s.CreateDocument(repo.ID, in.Filename, in.Type, in.Body, in.SourcePath)
 		if err != nil {
 			return err
@@ -389,6 +407,15 @@ func upsertDocument(in *docInputs) error {
 	if in.SourcePath != "" && in.SourcePath != existing.SourcePath {
 		sp := in.SourcePath
 		newSource = &sp
+	}
+	if opts.dryRun {
+		projected := *existing
+		projected.Type = in.Type
+		projected.SizeBytes = int64(len(body))
+		if newSource != nil {
+			projected.SourcePath = *newSource
+		}
+		return emitDryRun(&projected)
 	}
 	if err := s.UpdateDocument(existing.ID, newType, &body, newSource); err != nil {
 		return err
@@ -589,6 +616,16 @@ func applyDocEdit(filename string, newType *model.DocumentType, newContent *stri
 	if err != nil {
 		return err
 	}
+	if opts.dryRun {
+		projected := *d
+		if newType != nil {
+			projected.Type = *newType
+		}
+		if newContent != nil {
+			projected.SizeBytes = int64(len(*newContent))
+		}
+		return emitDryRun(&projected)
+	}
 	if err := s.UpdateDocument(d.ID, newType, newContent, nil); err != nil {
 		return err
 	}
@@ -675,6 +712,14 @@ func renameDocument(oldArg, newArg, typeStr string) error {
 	d, err := s.GetDocumentByFilename(repo.ID, oldName, false)
 	if err != nil {
 		return err
+	}
+	if opts.dryRun {
+		projected := *d
+		projected.Filename = newName
+		if newType != nil {
+			projected.Type = *newType
+		}
+		return emitDryRun(&projected)
 	}
 	if err := s.RenameDocument(d.ID, newName, newType); err != nil {
 		return err
@@ -788,6 +833,13 @@ func exportDocument(filename, explicitTo string, toPath bool) error {
 		return fmt.Errorf("repo path is unset; cannot resolve export destination")
 	}
 	absDest := filepath.Join(repoRoot, filepath.FromSlash(dest))
+	if opts.dryRun {
+		return emitDryRun(&docExportPreview{
+			Filename:    d.Filename,
+			Destination: absDest,
+			Bytes:       len(d.Content),
+		})
+	}
 	if err := os.MkdirAll(filepath.Dir(absDest), 0o755); err != nil {
 		return err
 	}
@@ -795,6 +847,16 @@ func exportDocument(filename, explicitTo string, toPath bool) error {
 		return err
 	}
 	return ok("wrote %s (%d bytes) to %s", d.Filename, len(d.Content), absDest)
+}
+
+// docExportPreview is the dry-run payload for `mk doc export`. It reports
+// the absolute path the body would be written to, plus the byte count, so
+// an agent can see whether the destination path is what it expected
+// without actually creating any files on disk.
+type docExportPreview struct {
+	Filename    string `json:"filename"`
+	Destination string `json:"destination"`
+	Bytes       int    `json:"bytes"`
 }
 
 func docRmCmd() *cobra.Command {
@@ -844,6 +906,17 @@ func removeDocument(filename string) error {
 	d, err := s.GetDocumentByFilename(repo.ID, filename, false)
 	if err != nil {
 		return err
+	}
+	if opts.dryRun {
+		links, err := s.ListDocumentLinks(d.ID)
+		if err != nil {
+			return err
+		}
+		return emitDryRun(&docDeletePreview{
+			Document:    d,
+			WouldDelete: true,
+			LinksRemoved: len(links),
+		})
 	}
 	if err := s.DeleteDocument(d.ID); err != nil {
 		return err
@@ -914,6 +987,21 @@ func linkDocument(filename, ref, why string) error {
 	if err != nil {
 		return err
 	}
+	if opts.dryRun {
+		preview := &model.DocumentLink{
+			DocumentID:       d.ID,
+			DocumentFilename: d.Filename,
+			DocumentType:     d.Type,
+			Description:      strings.TrimSpace(why),
+		}
+		if target.IssueID != nil {
+			preview.IssueID = target.IssueID
+		}
+		if target.FeatureID != nil {
+			preview.FeatureID = target.FeatureID
+		}
+		return emitDryRun(preview)
+	}
 	link, err := s.LinkDocument(d.ID, target, strings.TrimSpace(why))
 	if err != nil {
 		return err
@@ -983,6 +1071,29 @@ func unlinkDocument(filename, ref string) error {
 	if err != nil {
 		return err
 	}
+	if opts.dryRun {
+		links, err := s.ListDocumentLinks(d.ID)
+		if err != nil {
+			return err
+		}
+		matched := 0
+		for _, l := range links {
+			if target.IssueID != nil && l.IssueID != nil && *l.IssueID == *target.IssueID {
+				matched++
+			}
+			if target.FeatureID != nil && l.FeatureID != nil && *l.FeatureID == *target.FeatureID {
+				matched++
+			}
+		}
+		if matched == 0 {
+			return fmt.Errorf("no link from %s to %s", d.Filename, ref)
+		}
+		return emitDryRun(&docUnlinkPreview{
+			Filename:    d.Filename,
+			Target:      ref,
+			WouldRemove: matched,
+		})
+	}
 	n, err := s.UnlinkDocument(d.ID, target)
 	if err != nil {
 		return err
@@ -997,6 +1108,22 @@ func unlinkDocument(filename, ref string) error {
 		Details: "↛ " + ref,
 	})
 	return ok("unlinked %s from %s", d.Filename, ref)
+}
+
+// docDeletePreview is the dry-run payload for `mk doc rm`. LinksRemoved
+// counts how many document_links rows would cascade-delete alongside the
+// document row itself.
+type docDeletePreview struct {
+	Document     *model.Document `json:"document"`
+	WouldDelete  bool            `json:"would_delete"`
+	LinksRemoved int             `json:"links_removed"`
+}
+
+// docUnlinkPreview is the dry-run payload for `mk doc unlink`.
+type docUnlinkPreview struct {
+	Filename    string `json:"filename"`
+	Target      string `json:"target"`
+	WouldRemove int    `json:"would_remove"`
 }
 
 // docLinkTargetFromJSON converts a JSON link payload's (issue_key,

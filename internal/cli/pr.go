@@ -73,6 +73,12 @@ func attachPR(key, prURL string, strict bool) error {
 	if err != nil {
 		return err
 	}
+	if opts.dryRun {
+		return emitDryRun(&model.PullRequest{
+			IssueID: iss.ID,
+			URL:     pr,
+		})
+	}
 	created, err := s.AttachPR(iss.ID, pr)
 	if err != nil {
 		return err
@@ -135,6 +141,28 @@ func detachPR(key, prURL string, strict bool) error {
 		return err
 	}
 	clean := strings.TrimSpace(prURL)
+	if opts.dryRun {
+		// Confirm the URL is actually attached without removing it.
+		prs, err := s.ListPRs(iss.ID)
+		if err != nil {
+			return err
+		}
+		matched := false
+		for _, p := range prs {
+			if p.URL == clean {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return fmt.Errorf("no PR matching %q on %s", prURL, iss.Key)
+		}
+		return emitDryRun(&prDetachPreview{
+			IssueKey:    iss.Key,
+			URL:         clean,
+			WouldRemove: 1,
+		})
+	}
 	n, err := s.DetachPR(iss.ID, clean)
 	if err != nil {
 		return err
@@ -149,6 +177,13 @@ func detachPR(key, prURL string, strict bool) error {
 		Details: clean,
 	})
 	return ok("detached %s from %s", prURL, iss.Key)
+}
+
+// prDetachPreview is the dry-run payload for `mk pr detach`.
+type prDetachPreview struct {
+	IssueKey    string `json:"issue_key"`
+	URL         string `json:"url"`
+	WouldRemove int    `json:"would_remove"`
 }
 
 func prListCmd() *cobra.Command {

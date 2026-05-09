@@ -73,6 +73,15 @@ func createFeature(title, slug, description string) error {
 	if slug == "" {
 		slug = store.Slugify(title)
 	}
+	if opts.dryRun {
+		projected := &model.Feature{
+			RepoID:      repo.ID,
+			Slug:        slug,
+			Title:       title,
+			Description: description,
+		}
+		return emitDryRun(projected)
+	}
 	f, err := s.CreateFeature(repo.ID, slug, title, description)
 	if err != nil {
 		return err
@@ -227,6 +236,16 @@ func applyFeatureEdit(slug string, tPtr, dPtr *string) error {
 	if err != nil {
 		return err
 	}
+	if opts.dryRun {
+		projected := *f
+		if tPtr != nil {
+			projected.Title = *tPtr
+		}
+		if dPtr != nil {
+			projected.Description = *dPtr
+		}
+		return emitDryRun(&projected)
+	}
 	if err := s.UpdateFeature(f.ID, tPtr, dPtr); err != nil {
 		return err
 	}
@@ -294,6 +313,22 @@ func removeFeature(slug string) error {
 	if err != nil {
 		return err
 	}
+	if opts.dryRun {
+		issues, err := s.ListIssues(store.IssueFilter{RepoID: &repo.ID, FeatureID: &f.ID})
+		if err != nil {
+			return err
+		}
+		docs, err := s.ListDocumentsLinkedToFeature(f.ID)
+		if err != nil {
+			return err
+		}
+		return emitDryRun(&featureDeletePreview{
+			Feature:           f,
+			WouldDelete:       true,
+			IssuesUnlinked:    len(issues),
+			DocumentLinks:     len(docs),
+		})
+	}
 	if err := s.DeleteFeature(f.ID); err != nil {
 		return err
 	}
@@ -304,4 +339,15 @@ func removeFeature(slug string) error {
 		Details: f.Title,
 	})
 	return ok("feature %s deleted", f.Slug)
+}
+
+// featureDeletePreview is the dry-run payload for `mk feature rm`.
+// IssuesUnlinked counts issues that would have their feature_id set to NULL
+// (the schema cascades via SET NULL, not DELETE); DocumentLinks counts
+// document_links rows that would actually be removed.
+type featureDeletePreview struct {
+	Feature        *model.Feature `json:"feature"`
+	WouldDelete    bool           `json:"would_delete"`
+	IssuesUnlinked int            `json:"issues_unlinked"`
+	DocumentLinks  int            `json:"document_links"`
 }
