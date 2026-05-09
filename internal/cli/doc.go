@@ -430,7 +430,10 @@ func docShowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			view, err := c.ShowDocument(context.Background(), repo, args[0], !metadata)
+			view, err := retryWithRedirect(repo, "document", args[0],
+				func(filename string) (*client.DocView, error) {
+					return c.ShowDocument(context.Background(), repo, filename, !metadata)
+				})
 			if err != nil {
 				return err
 			}

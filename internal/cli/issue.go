@@ -185,7 +185,10 @@ func issueShowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			view, err := c.ShowIssue(context.Background(), repo, args[0])
+			view, err := retryWithRedirect(repo, "issue", args[0],
+				func(key string) (*client.IssueView, error) {
+					return c.ShowIssue(context.Background(), repo, key)
+				})
 			if err != nil {
 				return err
 			}
