@@ -92,16 +92,11 @@ func (c *remoteClient) listAllReposIssues(ctx context.Context, f IssueFilter) ([
 }
 
 func (c *remoteClient) GetIssueByKey(ctx context.Context, repo *model.Repo, key string) (*model.Issue, error) {
-	canonical, err := c.ResolveIssueKey(ctx, repo, key)
+	view, err := c.ShowIssue(ctx, repo, key)
 	if err != nil {
 		return nil, err
 	}
-	prefix := strings.SplitN(canonical, "-", 2)[0]
-	var out model.Issue
-	if err := c.do(ctx, http.MethodGet, "/repos/"+prefix+"/issues/"+canonical, nil, nil, &out); err != nil {
-		return nil, err
-	}
-	return &out, nil
+	return view.Issue, nil
 }
 
 func (c *remoteClient) ShowIssue(ctx context.Context, repo *model.Repo, key string) (*IssueView, error) {
