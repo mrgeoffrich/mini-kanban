@@ -71,6 +71,9 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("POST /repos/{prefix}/documents/{filename}/links", d.handleDocumentLink)
 	mux.HandleFunc("DELETE /repos/{prefix}/documents/{filename}/links", d.handleDocumentUnlink)
 
+	mux.HandleFunc("GET /history", d.handleHistoryAll)
+	mux.HandleFunc("GET /repos/{prefix}/history", d.handleHistoryRepo)
+
 	// Outermost first: panic recovery wraps everything so a bug in any
 	// later layer still returns a 500 envelope.
 	var h http.Handler = mux
