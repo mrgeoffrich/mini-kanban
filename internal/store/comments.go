@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/sync"
 )
 
 func (s *Store) CreateComment(issueID int64, author, body string) (*model.Comment, error) {
@@ -18,8 +19,8 @@ func (s *Store) CreateComment(issueID int64, author, body string) (*model.Commen
 		return nil, err
 	}
 	res, err := s.DB.Exec(
-		`INSERT INTO comments (issue_id, author, body) VALUES (?, ?, ?)`,
-		issueID, author, body,
+		`INSERT INTO comments (uuid, issue_id, author, body) VALUES (?, ?, ?, ?)`,
+		sync.New(), issueID, author, body,
 	)
 	if err != nil {
 		return nil, err
@@ -28,13 +29,23 @@ func (s *Store) CreateComment(issueID int64, author, body string) (*model.Commen
 	return s.GetCommentByID(id)
 }
 
+const commentCols = `id, uuid, issue_id, author, body, created_at`
+
 func (s *Store) GetCommentByID(id int64) (*model.Comment, error) {
-	row := s.DB.QueryRow(`SELECT id, issue_id, author, body, created_at FROM comments WHERE id = ?`, id)
+	row := s.DB.QueryRow(`SELECT `+commentCols+` FROM comments WHERE id = ?`, id)
+	return scanComment(row)
+}
+
+// GetCommentByUUID is the sync-side lookup. Comments live in their own
+// timestamped files under each issue folder, so an importer needs to
+// match incoming comment uuids against the DB.
+func (s *Store) GetCommentByUUID(uuid string) (*model.Comment, error) {
+	row := s.DB.QueryRow(`SELECT `+commentCols+` FROM comments WHERE uuid = ?`, uuid)
 	return scanComment(row)
 }
 
 func (s *Store) ListComments(issueID int64) ([]*model.Comment, error) {
-	rows, err := s.DB.Query(`SELECT id, issue_id, author, body, created_at FROM comments WHERE issue_id = ? ORDER BY created_at, id`, issueID)
+	rows, err := s.DB.Query(`SELECT `+commentCols+` FROM comments WHERE issue_id = ? ORDER BY created_at, id`, issueID)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +63,7 @@ func (s *Store) ListComments(issueID int64) ([]*model.Comment, error) {
 
 func scanComment(row rowScanner) (*model.Comment, error) {
 	var c model.Comment
-	err := row.Scan(&c.ID, &c.IssueID, &c.Author, &c.Body, &c.CreatedAt)
+	err := row.Scan(&c.ID, &c.UUID, &c.IssueID, &c.Author, &c.Body, &c.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

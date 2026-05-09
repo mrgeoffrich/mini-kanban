@@ -69,3 +69,49 @@ func TestCreateIssueCounterAtomicity(t *testing.T) {
 		t.Fatalf("second issue number = %d, want 2 (counter gap detected)", second.Number)
 	}
 }
+
+// TestIssueUUIDRoundTrip pins the Phase 1 invariants for the new uuid
+// column: every Create* path stamps a non-empty uuid, two creates
+// produce different uuids, and the value round-trips through
+// GetByID/GetByKey/GetByUUID. The test is deliberately small — Phase 1
+// does not change any other behaviour.
+func TestIssueUUIDRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	repo, err := s.CreateRepo("TST", "test", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	if repo.UUID == "" {
+		t.Fatalf("repo uuid is empty")
+	}
+
+	first, err := s.CreateIssue(repo.ID, nil, "first", "", model.StateBacklog, nil)
+	if err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+	second, err := s.CreateIssue(repo.ID, nil, "second", "", model.StateBacklog, nil)
+	if err != nil {
+		t.Fatalf("second create: %v", err)
+	}
+	if first.UUID == "" || second.UUID == "" {
+		t.Fatalf("issue uuid empty: first=%q second=%q", first.UUID, second.UUID)
+	}
+	if first.UUID == second.UUID {
+		t.Fatalf("issue uuids collided: %q", first.UUID)
+	}
+
+	got, err := s.GetIssueByUUID(first.UUID)
+	if err != nil {
+		t.Fatalf("get by uuid: %v", err)
+	}
+	if got.ID != first.ID || got.UUID != first.UUID {
+		t.Fatalf("uuid round-trip mismatch: got %+v want %+v", got, first)
+	}
+	gotByKey, err := s.GetIssueByKey("TST", first.Number)
+	if err != nil {
+		t.Fatalf("get by key: %v", err)
+	}
+	if gotByKey.UUID != first.UUID {
+		t.Fatalf("get by key uuid mismatch: got %q want %q", gotByKey.UUID, first.UUID)
+	}
+}

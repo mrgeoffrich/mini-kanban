@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/sync"
 )
 
 var issueKeyRe = regexp.MustCompile(`^([A-Za-z0-9]{4})-(\d+)$`)
@@ -53,8 +54,8 @@ func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description s
 	}
 
 	res, err := tx.Exec(
-		`INSERT INTO issues (repo_id, number, feature_id, title, description, state) VALUES (?, ?, ?, ?, ?, ?)`,
-		repoID, num, nullableInt(featureID), title, description, string(state),
+		`INSERT INTO issues (uuid, repo_id, number, feature_id, title, description, state) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		sync.New(), repoID, num, nullableInt(featureID), title, description, string(state),
 	)
 	if err != nil {
 		return nil, err
@@ -83,6 +84,17 @@ func (s *Store) GetIssueByID(id int64) (*model.Issue, error) {
 
 func (s *Store) GetIssueByKey(prefix string, number int64) (*model.Issue, error) {
 	iss, err := scanIssue(s.DB.QueryRow(issueSelect+` WHERE r.prefix = ? AND i.number = ?`, prefix, number))
+	if err != nil {
+		return nil, err
+	}
+	return s.attachTags(iss)
+}
+
+// GetIssueByUUID is the sync-side lookup: import resolves cross-references
+// (blocks/relates_to/duplicate_of, doc links, etc.) and incoming records
+// by uuid, never by the (mutable) issue key.
+func (s *Store) GetIssueByUUID(uuid string) (*model.Issue, error) {
+	iss, err := scanIssue(s.DB.QueryRow(issueSelect+` WHERE i.uuid = ?`, uuid))
 	if err != nil {
 		return nil, err
 	}
@@ -360,7 +372,7 @@ func (s *Store) CountFeatures(repoID int64) (int, error) {
 }
 
 const issueSelect = `
-SELECT i.id, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slug, ''),
+SELECT i.id, i.uuid, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slug, ''),
        i.title, i.description, i.state, i.assignee, i.created_at, i.updated_at
 FROM issues i
 JOIN repos r ON r.id = i.repo_id
@@ -374,7 +386,7 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 		featSlug  string
 		state     string
 	)
-	err := row.Scan(&i.ID, &i.RepoID, &i.Number, &prefix, &featureID, &featSlug,
+	err := row.Scan(&i.ID, &i.UUID, &i.RepoID, &i.Number, &prefix, &featureID, &featSlug,
 		&i.Title, &i.Description, &state, &i.Assignee, &i.CreatedAt, &i.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound

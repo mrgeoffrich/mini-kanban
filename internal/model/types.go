@@ -4,6 +4,7 @@ import "time"
 
 type Repo struct {
 	ID              int64     `json:"id"`
+	UUID            string    `json:"uuid"`
 	Prefix          string    `json:"prefix"`
 	Name            string    `json:"name"`
 	Path            string    `json:"path"`
@@ -14,6 +15,7 @@ type Repo struct {
 
 type Feature struct {
 	ID          int64     `json:"id"`
+	UUID        string    `json:"uuid"`
 	RepoID      int64     `json:"repo_id"`
 	Slug        string    `json:"slug"`
 	Title       string    `json:"title"`
@@ -24,6 +26,7 @@ type Feature struct {
 
 type Issue struct {
 	ID          int64     `json:"id"`
+	UUID        string    `json:"uuid"`
 	RepoID      int64     `json:"repo_id"`
 	Number      int64     `json:"number"`
 	Key         string    `json:"key"` // e.g. "MINI-42"
@@ -40,6 +43,7 @@ type Issue struct {
 
 type Comment struct {
 	ID        int64     `json:"id"`
+	UUID      string    `json:"uuid"`
 	IssueID   int64     `json:"issue_id"`
 	Author    string    `json:"author"`
 	Body      string    `json:"body"`

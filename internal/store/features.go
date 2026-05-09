@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/sync"
 )
 
 var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
@@ -39,8 +40,8 @@ func (s *Store) CreateFeature(repoID int64, slug, title, description string) (*m
 		return nil, err
 	}
 	res, err := s.DB.Exec(
-		`INSERT INTO features (repo_id, slug, title, description) VALUES (?, ?, ?, ?)`,
-		repoID, slug, title, description,
+		`INSERT INTO features (uuid, repo_id, slug, title, description) VALUES (?, ?, ?, ?, ?)`,
+		sync.New(), repoID, slug, title, description,
 	)
 	if err != nil {
 		return nil, err
@@ -49,12 +50,20 @@ func (s *Store) CreateFeature(repoID int64, slug, title, description string) (*m
 	return s.GetFeatureByID(id)
 }
 
+const featureCols = `id, uuid, repo_id, slug, title, description, created_at, updated_at`
+
 func (s *Store) GetFeatureByID(id int64) (*model.Feature, error) {
-	return scanFeature(s.DB.QueryRow(`SELECT id, repo_id, slug, title, description, created_at, updated_at FROM features WHERE id = ?`, id))
+	return scanFeature(s.DB.QueryRow(`SELECT `+featureCols+` FROM features WHERE id = ?`, id))
 }
 
 func (s *Store) GetFeatureBySlug(repoID int64, slug string) (*model.Feature, error) {
-	return scanFeature(s.DB.QueryRow(`SELECT id, repo_id, slug, title, description, created_at, updated_at FROM features WHERE repo_id = ? AND slug = ?`, repoID, slug))
+	return scanFeature(s.DB.QueryRow(`SELECT `+featureCols+` FROM features WHERE repo_id = ? AND slug = ?`, repoID, slug))
+}
+
+// GetFeatureByUUID is the sync-side lookup: import maps the canonical
+// uuid in feature.yaml back to a DB row, ignoring slug churn.
+func (s *Store) GetFeatureByUUID(uuid string) (*model.Feature, error) {
+	return scanFeature(s.DB.QueryRow(`SELECT `+featureCols+` FROM features WHERE uuid = ?`, uuid))
 }
 
 // ListFeatures returns every feature in the repo. When includeDescription is
@@ -62,7 +71,7 @@ func (s *Store) GetFeatureBySlug(repoID int64, slug string) (*model.Feature, err
 // rarely want full bodies inlined, and dropping them keeps the JSON output
 // small enough to fit comfortably into an agent's context window.
 func (s *Store) ListFeatures(repoID int64, includeDescription bool) ([]*model.Feature, error) {
-	rows, err := s.DB.Query(`SELECT id, repo_id, slug, title, description, created_at, updated_at FROM features WHERE repo_id = ? ORDER BY created_at`, repoID)
+	rows, err := s.DB.Query(`SELECT `+featureCols+` FROM features WHERE repo_id = ? ORDER BY created_at`, repoID)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +125,7 @@ func (s *Store) DeleteFeature(id int64) error {
 
 func scanFeature(row rowScanner) (*model.Feature, error) {
 	var f model.Feature
-	err := row.Scan(&f.ID, &f.RepoID, &f.Slug, &f.Title, &f.Description, &f.CreatedAt, &f.UpdatedAt)
+	err := row.Scan(&f.ID, &f.UUID, &f.RepoID, &f.Slug, &f.Title, &f.Description, &f.CreatedAt, &f.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

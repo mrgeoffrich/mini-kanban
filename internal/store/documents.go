@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/sync"
 )
 
 var ErrDocumentExists = errors.New("a document with that filename already exists in this repo")
@@ -21,8 +22,8 @@ func (s *Store) CreateDocument(repoID int64, filename string, t model.DocumentTy
 		return nil, err
 	}
 	res, err := s.DB.Exec(
-		`INSERT INTO documents (repo_id, filename, type, content, size_bytes, source_path) VALUES (?, ?, ?, ?, ?, ?)`,
-		repoID, filename, string(t), content, len(content), sourcePath,
+		`INSERT INTO documents (uuid, repo_id, filename, type, content, size_bytes, source_path) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		sync.New(), repoID, filename, string(t), content, len(content), sourcePath,
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
@@ -43,6 +44,15 @@ func (s *Store) GetDocumentByID(id int64, withContent bool) (*model.Document, er
 func (s *Store) GetDocumentByFilename(repoID int64, filename string, withContent bool) (*model.Document, error) {
 	cols := docCols(withContent)
 	row := s.DB.QueryRow(`SELECT `+cols+` FROM documents WHERE repo_id = ? AND filename = ?`, repoID, filename)
+	return scanDocument(row, withContent)
+}
+
+// GetDocumentByUUID is the sync-side lookup: doc folder → uuid in
+// doc.yaml → DB row. Always returns the body so callers handling sync
+// content comparisons see the full record.
+func (s *Store) GetDocumentByUUID(uuid string, withContent bool) (*model.Document, error) {
+	cols := docCols(withContent)
+	row := s.DB.QueryRow(`SELECT `+cols+` FROM documents WHERE uuid = ?`, uuid)
 	return scanDocument(row, withContent)
 }
 
@@ -142,7 +152,7 @@ func (s *Store) DeleteDocument(id int64) error {
 }
 
 func docCols(withContent bool) string {
-	c := "id, repo_id, filename, type, size_bytes, source_path, created_at, updated_at"
+	c := "id, uuid, repo_id, filename, type, size_bytes, source_path, created_at, updated_at"
 	if withContent {
 		c += ", content"
 	}
@@ -156,9 +166,9 @@ func scanDocument(row rowScanner, withContent bool) (*model.Document, error) {
 		err error
 	)
 	if withContent {
-		err = row.Scan(&d.ID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.SourcePath, &d.CreatedAt, &d.UpdatedAt, &d.Content)
+		err = row.Scan(&d.ID, &d.UUID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.SourcePath, &d.CreatedAt, &d.UpdatedAt, &d.Content)
 	} else {
-		err = row.Scan(&d.ID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.SourcePath, &d.CreatedAt, &d.UpdatedAt)
+		err = row.Scan(&d.ID, &d.UUID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.SourcePath, &d.CreatedAt, &d.UpdatedAt)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
