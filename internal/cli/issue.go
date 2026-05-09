@@ -521,65 +521,42 @@ shape of an issue's context without paying for every linked doc's full
 text. Fetch specific bodies later via mk doc show.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStore()
+			c, err := openClient()
 			if err != nil {
 				return err
 			}
-			defer s.Close()
-			iss, err := resolveIssueByKey(s, args[0])
+			defer c.Close()
+			repo, err := repoForIssueKey(c, args[0])
 			if err != nil {
 				return err
 			}
-
-			var feat *model.Feature
-			if iss.FeatureID != nil {
-				feat, err = s.GetFeatureByID(*iss.FeatureID)
-				if err != nil {
-					return err
-				}
-			}
-
-			rels, err := s.ListIssueRelations(iss.ID)
+			view, err := c.BriefIssue(context.Background(), repo, args[0], client.BriefOptions{
+				NoFeatureDocs: noFeatureDocs,
+				NoComments:    noComments,
+				NoDocContent:  noDocContent,
+			})
 			if err != nil {
 				return err
 			}
-			prs, err := s.ListPRs(iss.ID)
-			if err != nil {
-				return err
+			docs := make([]*briefDoc, 0, len(view.Documents))
+			for _, d := range view.Documents {
+				docs = append(docs, &briefDoc{
+					Filename:    d.Filename,
+					Type:        d.Type,
+					Description: d.Description,
+					SourcePath:  d.SourcePath,
+					LinkedVia:   d.LinkedVia,
+					Content:     d.Content,
+				})
 			}
-			if prs == nil {
-				prs = []*model.PullRequest{}
-			}
-
-			docs, warnings, err := collectBriefDocs(s, iss.ID, feat, !noFeatureDocs)
-			if err != nil {
-				return err
-			}
-			if noDocContent {
-				for _, d := range docs {
-					d.Content = ""
-				}
-			}
-
-			var comments []*model.Comment
-			if !noComments {
-				comments, err = s.ListComments(iss.ID)
-				if err != nil {
-					return err
-				}
-			}
-			if comments == nil {
-				comments = []*model.Comment{}
-			}
-
 			brief := &issueBrief{
-				Issue:        iss,
-				Feature:      feat,
-				Relations:    rels,
-				PullRequests: prs,
+				Issue:        view.Issue,
+				Feature:      view.Feature,
+				Relations:    view.Relations,
+				PullRequests: view.PullRequests,
 				Documents:    docs,
-				Comments:     comments,
-				Warnings:     warnings,
+				Comments:     view.Comments,
+				Warnings:     view.Warnings,
 			}
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
@@ -590,77 +567,6 @@ text. Fetch specific bodies later via mk doc show.`,
 	cmd.Flags().BoolVar(&noComments, "no-comments", false, "skip the comments section")
 	cmd.Flags().BoolVar(&noDocContent, "no-doc-content", false, "keep linked-doc metadata but drop their bodies (fetch via `mk doc show`)")
 	return cmd
-}
-
-// collectBriefDocs assembles the deduped document list for an issue brief.
-// Issue links come first; feature links append to existing entries (extending
-// linked_via) or create new ones. When both link rows have differing --why
-// descriptions, the issue's wins and a warning is appended so nothing is
-// silently dropped.
-func collectBriefDocs(s *store.Store, issueID int64, feat *model.Feature, includeFeature bool) ([]*briefDoc, []string, error) {
-	warnings := []string{}
-	out := []*briefDoc{}
-	byDocID := map[int64]*briefDoc{}
-
-	issueLinks, err := s.ListDocumentsLinkedToIssue(issueID)
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, l := range issueLinks {
-		d, err := s.GetDocumentByID(l.DocumentID, true)
-		if err != nil {
-			return nil, nil, err
-		}
-		entry := &briefDoc{
-			Filename:    d.Filename,
-			Type:        d.Type,
-			Description: l.Description,
-			SourcePath:  d.SourcePath,
-			LinkedVia:   []string{"issue"},
-			Content:     d.Content,
-		}
-		out = append(out, entry)
-		byDocID[d.ID] = entry
-	}
-
-	if includeFeature && feat != nil {
-		featLinks, err := s.ListDocumentsLinkedToFeature(feat.ID)
-		if err != nil {
-			return nil, nil, err
-		}
-		via := "feature/" + feat.Slug
-		for _, l := range featLinks {
-			if existing, ok := byDocID[l.DocumentID]; ok {
-				existing.LinkedVia = append(existing.LinkedVia, via)
-				if l.Description != "" && l.Description != existing.Description {
-					if existing.Description == "" {
-						existing.Description = l.Description
-					} else {
-						warnings = append(warnings, fmt.Sprintf(
-							"document %s: feature link description differs from issue link; using issue's. Feature said: %q",
-							existing.Filename, l.Description))
-					}
-				}
-				continue
-			}
-			d, err := s.GetDocumentByID(l.DocumentID, true)
-			if err != nil {
-				return nil, nil, err
-			}
-			entry := &briefDoc{
-				Filename:    d.Filename,
-				Type:        d.Type,
-				Description: l.Description,
-				SourcePath:  d.SourcePath,
-				LinkedVia:   []string{via},
-				Content:     d.Content,
-			}
-			out = append(out, entry)
-			byDocID[d.ID] = entry
-		}
-	}
-
-	return out, warnings, nil
 }
 
 func issueAssignCmd() *cobra.Command {
@@ -842,40 +748,21 @@ identity instead of the OS username.`,
 }
 
 func claimNextIssue(featureSlug string) error {
-	s, err := openStore()
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	repo, err := resolveRepo(s)
+	defer c.Close()
+	repo, err := resolveRepoC(c)
 	if err != nil {
 		return err
 	}
-	feat, err := s.GetFeatureBySlug(repo.ID, featureSlug)
+	iss, err := c.ClaimNextIssue(context.Background(), repo, featureSlug, opts.dryRun)
 	if err != nil {
-		return fmt.Errorf("feature %q: %w", featureSlug, err)
+		return err
 	}
 	if opts.dryRun {
-		// Equivalent to `mk issue peek`: report what would be claimed
-		// without flipping state or stamping the assignee.
-		iss, err := s.PeekNextIssue(repo.ID, feat.ID)
-		if err != nil {
-			return err
-		}
 		return emitDryRun(&claimResult{Issue: iss})
-	}
-	who := actor()
-	iss, err := s.ClaimNextIssue(repo.ID, feat.ID, who)
-	if err != nil {
-		return err
-	}
-	if iss != nil {
-		recordOp(s, model.HistoryEntry{
-			RepoID: &repo.ID, RepoPrefix: repo.Prefix,
-			Op: "issue.claim", Kind: "issue",
-			TargetID: &iss.ID, TargetLabel: iss.Key,
-			Details: fmt.Sprintf("claimed by %s (todo → in_progress)", who),
-		})
 	}
 	return emit(&claimResult{Issue: iss})
 }
@@ -896,20 +783,16 @@ claimable, matching the shape of ` + "`mk issue next`" + `.`,
 			if featureSlug == "" {
 				return fmt.Errorf("--feature is required")
 			}
-			s, err := openStore()
+			c, err := openClient()
 			if err != nil {
 				return err
 			}
-			defer s.Close()
-			repo, err := resolveRepo(s)
+			defer c.Close()
+			repo, err := resolveRepoC(c)
 			if err != nil {
 				return err
 			}
-			feat, err := s.GetFeatureBySlug(repo.ID, featureSlug)
-			if err != nil {
-				return fmt.Errorf("feature %q: %w", featureSlug, err)
-			}
-			iss, err := s.PeekNextIssue(repo.ID, feat.ID)
+			iss, err := c.PeekNextIssue(context.Background(), repo, featureSlug)
 			if err != nil {
 				return err
 			}
