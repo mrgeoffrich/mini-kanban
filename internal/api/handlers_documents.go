@@ -408,6 +408,68 @@ func (d deps) handleDocumentRename(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, updated)
 }
 
+func (d deps) handleDocumentDelete(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	doc, ok := resolveDocumentOnRepo(w, r, d.store, repo, false)
+	if !ok {
+		return
+	}
+	if isDryRun(r) {
+		preview, err := buildDocumentDeletePreview(d.store, doc)
+		if err != nil {
+			s, c := statusForError(err)
+			writeError(w, s, c, err.Error(), nil)
+			return
+		}
+		writeDryRun(w, http.StatusOK, preview)
+		return
+	}
+	if err := d.store.DeleteDocument(doc.ID); err != nil {
+		s, c := statusForError(err)
+		writeError(w, s, c, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Actor:    ActorFromContext(r.Context()),
+		Op:       "document.delete",
+		Kind:     "document",
+		TargetID: &doc.ID, TargetLabel: doc.Filename,
+		Details: "type=" + string(doc.Type),
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// buildDocumentDeletePreview counts the issue/feature link rows that would
+// cascade-delete with the document. Mirrors `mk doc rm --dry-run` but splits
+// the link-row count into issue vs feature so consumers can see the shape.
+func buildDocumentDeletePreview(s *store.Store, doc *model.Document) (*DocumentDeletePreview, error) {
+	links, err := s.ListDocumentLinks(doc.ID)
+	if err != nil {
+		return nil, err
+	}
+	var issues, features int
+	for _, l := range links {
+		switch {
+		case l.IssueID != nil:
+			issues++
+		case l.FeatureID != nil:
+			features++
+		}
+	}
+	return &DocumentDeletePreview{
+		Document:    doc,
+		WouldDelete: true,
+		Cascade: DocumentCascadeCount{
+			IssueLinks:   issues,
+			FeatureLinks: features,
+		},
+	}, nil
+}
+
 // resolvedDocCreate is the validated tuple that document create/upsert
 // hand off to the store.
 type resolvedDocCreate struct {

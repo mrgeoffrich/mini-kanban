@@ -478,6 +478,55 @@ func TestDocumentRenameCollision(t *testing.T) {
 	}
 }
 
+func TestDocumentDeleteHappy(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "B")
+	resp, _ := apiDelete(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md", nil)
+	if resp.StatusCode != 204 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	if _, err := s.GetDocumentByFilename(repo.ID, "x.md", false); err == nil {
+		t.Fatalf("doc still present")
+	}
+	assertHistoryOps(t, s, []string{"document.delete"})
+}
+
+func TestDocumentDeleteDryRunCascade(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	doc := seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "B")
+	iss := seedIssue(t, s, repo, "i")
+	feat := seedFeature(t, s, repo, "auth", "Auth")
+	if _, err := s.LinkDocument(doc.ID, store.LinkTarget{IssueID: &iss.ID}, ""); err != nil {
+		t.Fatalf("link issue: %v", err)
+	}
+	if _, err := s.LinkDocument(doc.ID, store.LinkTarget{FeatureID: &feat.ID}, ""); err != nil {
+		t.Fatalf("link feat: %v", err)
+	}
+	resp, raw := apiDelete(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md?dry_run=true", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
+	}
+	var prev struct {
+		Document    *model.Document `json:"document"`
+		WouldDelete bool            `json:"would_delete"`
+		Cascade     struct {
+			IssueLinks   int `json:"issue_links"`
+			FeatureLinks int `json:"feature_links"`
+		} `json:"cascade"`
+	}
+	if err := json.Unmarshal(raw, &prev); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !prev.WouldDelete || prev.Cascade.IssueLinks != 1 || prev.Cascade.FeatureLinks != 1 {
+		t.Fatalf("preview: %+v", prev)
+	}
+	if _, err := s.GetDocumentByFilename(repo.ID, "x.md", false); err != nil {
+		t.Fatalf("dry-run mutated: %v", err)
+	}
+}
+
 func TestDocumentRenameDryRun(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)

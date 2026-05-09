@@ -65,6 +65,7 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /repos/{prefix}/documents/{filename}", d.handleDocumentShow)
 	mux.HandleFunc("PUT /repos/{prefix}/documents/{filename}", d.handleDocumentUpsert)
 	mux.HandleFunc("PATCH /repos/{prefix}/documents/{filename}", d.handleDocumentEdit)
+	mux.HandleFunc("DELETE /repos/{prefix}/documents/{filename}", d.handleDocumentDelete)
 	mux.HandleFunc("POST /repos/{prefix}/documents/{filename}/rename", d.handleDocumentRename)
 
 	// Outermost first: panic recovery wraps everything so a bug in any
