@@ -2,12 +2,13 @@ package cli
 
 import (
 	"fmt"
-	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
 
 func newPRCmd() *cobra.Command {
@@ -17,89 +18,172 @@ func newPRCmd() *cobra.Command {
 }
 
 func validatePRURL(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", fmt.Errorf("URL is required")
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return "", fmt.Errorf("invalid URL: %w", err)
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return "", fmt.Errorf("URL must use http or https scheme")
-	}
-	if u.Host == "" {
-		return "", fmt.Errorf("URL must include a host")
-	}
-	return raw, nil
+	return store.ValidatePRURLStrict(raw)
 }
 
 func prAttachCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "attach <KEY> <URL>",
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "attach [KEY] [URL]",
 		Short: "Attach a pull request URL to an issue",
-		Args:  cobra.ExactArgs(2),
+		Args:  cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pr, err := validatePRURL(args[1])
+			raw, err := readJSONInput(rawInput)
 			if err != nil {
 				return err
 			}
-			s, err := openStore()
-			if err != nil {
-				return err
+			if raw != nil {
+				if err := rejectMixedInput(cmd, args); err != nil {
+					return err
+				}
+				in, _, err := decodeStrict[inputs.PRAttachInput](raw)
+				if err != nil {
+					return err
+				}
+				if in.IssueKey == "" || in.URL == "" {
+					return fmt.Errorf("issue_key and url are required")
+				}
+				return attachPR(in.IssueKey, in.URL, true)
 			}
-			defer s.Close()
-			iss, err := resolveIssueByKey(s, args[0])
-			if err != nil {
-				return err
+			if len(args) != 2 {
+				return fmt.Errorf("requires <KEY> <URL> positionals or --json")
 			}
-			created, err := s.AttachPR(iss.ID, pr)
-			if err != nil {
-				return err
-			}
-			recordOp(s, model.HistoryEntry{
-				RepoID: &iss.RepoID,
-				Op:     "pr.attach", Kind: "issue",
-				TargetID: &iss.ID, TargetLabel: iss.Key,
-				Details: pr,
-			})
-			return emit(created)
+			return attachPR(args[0], args[1], false)
 		},
 	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func attachPR(key, prURL string, strict bool) error {
+	pr, err := validatePRURL(prURL)
+	if err != nil {
+		return err
+	}
+	s, err := openStore()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	resolve := resolveIssueByKey
+	if strict {
+		resolve = resolveIssueKeyStrict
+	}
+	iss, err := resolve(s, key)
+	if err != nil {
+		return err
+	}
+	if opts.dryRun {
+		return emitDryRun(&model.PullRequest{
+			IssueID: iss.ID,
+			URL:     pr,
+		})
+	}
+	created, err := s.AttachPR(iss.ID, pr)
+	if err != nil {
+		return err
+	}
+	recordOp(s, model.HistoryEntry{
+		RepoID: &iss.RepoID,
+		Op:     "pr.attach", Kind: "issue",
+		TargetID: &iss.ID, TargetLabel: iss.Key,
+		Details: pr,
+	})
+	return emit(created)
 }
 
 func prDetachCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "detach <KEY> <URL>",
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "detach [KEY] [URL]",
 		Short: "Detach a pull request URL from an issue",
-		Args:  cobra.ExactArgs(2),
+		Args:  cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStore()
+			raw, err := readJSONInput(rawInput)
 			if err != nil {
 				return err
 			}
-			defer s.Close()
-			iss, err := resolveIssueByKey(s, args[0])
-			if err != nil {
-				return err
+			if raw != nil {
+				if err := rejectMixedInput(cmd, args); err != nil {
+					return err
+				}
+				in, _, err := decodeStrict[inputs.PRDetachInput](raw)
+				if err != nil {
+					return err
+				}
+				if in.IssueKey == "" || in.URL == "" {
+					return fmt.Errorf("issue_key and url are required")
+				}
+				return detachPR(in.IssueKey, in.URL, true)
 			}
-			url := strings.TrimSpace(args[1])
-			n, err := s.DetachPR(iss.ID, url)
-			if err != nil {
-				return err
+			if len(args) != 2 {
+				return fmt.Errorf("requires <KEY> <URL> positionals or --json")
 			}
-			if n == 0 {
-				return fmt.Errorf("no PR matching %q on %s", args[1], iss.Key)
-			}
-			recordOp(s, model.HistoryEntry{
-				RepoID: &iss.RepoID,
-				Op:     "pr.detach", Kind: "issue",
-				TargetID: &iss.ID, TargetLabel: iss.Key,
-				Details: url,
-			})
-			return ok("detached %s from %s", args[1], iss.Key)
+			return detachPR(args[0], args[1], false)
 		},
 	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func detachPR(key, prURL string, strict bool) error {
+	s, err := openStore()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	resolve := resolveIssueByKey
+	if strict {
+		resolve = resolveIssueKeyStrict
+	}
+	iss, err := resolve(s, key)
+	if err != nil {
+		return err
+	}
+	clean := strings.TrimSpace(prURL)
+	if opts.dryRun {
+		// Confirm the URL is actually attached without removing it.
+		prs, err := s.ListPRs(iss.ID)
+		if err != nil {
+			return err
+		}
+		matched := false
+		for _, p := range prs {
+			if p.URL == clean {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return fmt.Errorf("no PR matching %q on %s", prURL, iss.Key)
+		}
+		return emitDryRun(&prDetachPreview{
+			IssueKey:    iss.Key,
+			URL:         clean,
+			WouldRemove: 1,
+		})
+	}
+	n, err := s.DetachPR(iss.ID, clean)
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("no PR matching %q on %s", prURL, iss.Key)
+	}
+	recordOp(s, model.HistoryEntry{
+		RepoID: &iss.RepoID,
+		Op:     "pr.detach", Kind: "issue",
+		TargetID: &iss.ID, TargetLabel: iss.Key,
+		Details: clean,
+	})
+	return ok("detached %s from %s", prURL, iss.Key)
+}
+
+// prDetachPreview is the dry-run payload for `mk pr detach`.
+type prDetachPreview struct {
+	IssueKey    string `json:"issue_key"`
+	URL         string `json:"url"`
+	WouldRemove int    `json:"would_remove"`
 }
 
 func prListCmd() *cobra.Command {

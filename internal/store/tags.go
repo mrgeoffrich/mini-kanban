@@ -6,19 +6,31 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
+
+const maxTagLen = 80
 
 // NormalizeTag trims surrounding whitespace and validates the result. Tags are
 // case-sensitive (so "WIP" and "wip" are distinct) and may not contain inner
-// whitespace.
+// whitespace, control characters, or invalid UTF-8.
 func NormalizeTag(s string) (string, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return "", fmt.Errorf("tag cannot be empty")
 	}
+	if !utf8.ValidString(s) {
+		return "", fmt.Errorf("tag is not valid UTF-8")
+	}
+	if len(s) > maxTagLen {
+		return "", fmt.Errorf("tag too long: %d chars, max %d", len(s), maxTagLen)
+	}
 	for _, r := range s {
 		if unicode.IsSpace(r) {
 			return "", fmt.Errorf("tag %q must not contain whitespace", s)
+		}
+		if isDisallowedControlSingle(r) {
+			return "", fmt.Errorf("tag contains a disallowed control character (U+%04X)", r)
 		}
 	}
 	return s, nil

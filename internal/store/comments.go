@@ -9,6 +9,14 @@ import (
 )
 
 func (s *Store) CreateComment(issueID int64, author, body string) (*model.Comment, error) {
+	author, err := ValidateName(author, "author")
+	if err != nil {
+		return nil, err
+	}
+	body, err = ValidateBody(body, "body", true)
+	if err != nil {
+		return nil, err
+	}
 	res, err := s.DB.Exec(
 		`INSERT INTO comments (issue_id, author, body) VALUES (?, ?, ?)`,
 		issueID, author, body,

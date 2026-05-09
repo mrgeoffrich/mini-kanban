@@ -27,6 +27,14 @@ func emit(v any) error {
 	return renderText(os.Stdout, v)
 }
 
+// emitDryRun writes a `[dry-run]` marker to stderr (so agents can grep for
+// it) and emits v on stdout exactly as a real call would. The shape matches
+// the real-call output so downstream parsers don't need a special path.
+func emitDryRun(v any) error {
+	fmt.Fprintln(os.Stderr, "[dry-run] no changes were written")
+	return emit(v)
+}
+
 func renderText(w io.Writer, v any) error {
 	switch x := v.(type) {
 	case *model.Repo:

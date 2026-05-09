@@ -20,6 +20,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Git detection: `internal/git/detect.go` shells out to `git` for repo root + remote URL.
 - TUI: `internal/tui/` — bubbletea v1.3.10 + lipgloss v1.1.0. Shell in `tui.go` owns the tab strip and routes keys; each tab implements the local `view` interface.
 
+## Agent-CLI principles (read before planning a feature)
+
+`docs/agent-cli-principles.md` is the durable reference for the conventions mk adopted from Justin Poehnelt's "Rewrite Your CLI for AI Agents". Every mutating command accepts JSON via `--json`, publishes its schema via `mk schema`, returns lean output by default, validates input at the store boundary, supports `--dry-run`, and is documented in `SKILL.md`. New CLI work should honour those six rules and the explicit "deliberately don't do" list (no NDJSON, no `--field` projection, no silent input normalisation, etc.). The longer working notes that produced the rules — threat models, alternatives considered — are in `docs/agent-cli-redesign.md`.
+
 ## Conventions that aren't obvious
 
 - **`recordOp` after every mutation.** Every CLI command that writes to the database calls `recordOp(s, model.HistoryEntry{...})` from `internal/cli/audit.go`. History prune failures and audit-write failures log to stderr but never fail the user-visible command. New mutating commands MUST follow this pattern.

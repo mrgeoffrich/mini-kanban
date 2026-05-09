@@ -26,6 +26,18 @@ func Slugify(s string) string {
 }
 
 func (s *Store) CreateFeature(repoID int64, slug, title, description string) (*model.Feature, error) {
+	slug, err := ValidateSlug(slug)
+	if err != nil {
+		return nil, err
+	}
+	title, err = ValidateTitle(title, "title")
+	if err != nil {
+		return nil, err
+	}
+	description, err = ValidateBody(description, "description", false)
+	if err != nil {
+		return nil, err
+	}
 	res, err := s.DB.Exec(
 		`INSERT INTO features (repo_id, slug, title, description) VALUES (?, ?, ?, ?)`,
 		repoID, slug, title, description,
@@ -45,7 +57,11 @@ func (s *Store) GetFeatureBySlug(repoID int64, slug string) (*model.Feature, err
 	return scanFeature(s.DB.QueryRow(`SELECT id, repo_id, slug, title, description, created_at, updated_at FROM features WHERE repo_id = ? AND slug = ?`, repoID, slug))
 }
 
-func (s *Store) ListFeatures(repoID int64) ([]*model.Feature, error) {
+// ListFeatures returns every feature in the repo. When includeDescription is
+// false the heavy `description` field is stripped post-scan — list contexts
+// rarely want full bodies inlined, and dropping them keeps the JSON output
+// small enough to fit comfortably into an agent's context window.
+func (s *Store) ListFeatures(repoID int64, includeDescription bool) ([]*model.Feature, error) {
 	rows, err := s.DB.Query(`SELECT id, repo_id, slug, title, description, created_at, updated_at FROM features WHERE repo_id = ? ORDER BY created_at`, repoID)
 	if err != nil {
 		return nil, err
@@ -57,6 +73,9 @@ func (s *Store) ListFeatures(repoID int64) ([]*model.Feature, error) {
 		if err != nil {
 			return nil, err
 		}
+		if !includeDescription {
+			f.Description = ""
+		}
 		out = append(out, f)
 	}
 	return out, rows.Err()
@@ -66,12 +85,20 @@ func (s *Store) UpdateFeature(id int64, title, description *string) error {
 	sets := []string{}
 	args := []any{}
 	if title != nil {
+		clean, err := ValidateTitle(*title, "title")
+		if err != nil {
+			return err
+		}
 		sets = append(sets, "title = ?")
-		args = append(args, *title)
+		args = append(args, clean)
 	}
 	if description != nil {
+		clean, err := ValidateBody(*description, "description", false)
+		if err != nil {
+			return err
+		}
 		sets = append(sets, "description = ?")
-		args = append(args, *description)
+		args = append(args, clean)
 	}
 	if len(sets) == 0 {
 		return nil

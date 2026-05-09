@@ -54,7 +54,7 @@ func newFeaturesView(s *store.Store, repo *model.Repo) *featuresView {
 }
 
 func (f *featuresView) reload() {
-	list, err := f.store.ListFeatures(f.repo.ID)
+	list, err := f.store.ListFeatures(f.repo.ID, true)
 	if err != nil {
 		f.err = err
 		return

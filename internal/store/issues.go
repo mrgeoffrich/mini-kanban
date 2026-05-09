@@ -33,6 +33,14 @@ func ParseIssueKey(key string) (prefix string, number int64, err error) {
 // way a phantom-number gap requires a Commit to actually succeed, which
 // only happens when every preceding step succeeded.
 func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description string, state model.State, tags []string) (*model.Issue, error) {
+	title, err := ValidateTitle(title, "title")
+	if err != nil {
+		return nil, err
+	}
+	description, err = ValidateBody(description, "description", false)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return nil, err
@@ -99,6 +107,11 @@ type IssueFilter struct {
 	FeatureID *int64
 	Tags      []string // AND semantics: issue must have ALL of these tags
 	AllRepos  bool
+
+	// IncludeDescription, when true, leaves the heavy `description` field
+	// populated on each returned issue. Defaults to false so list responses
+	// stay lean — full bodies are available via `mk issue show` / `brief`.
+	IncludeDescription bool
 }
 
 func (s *Store) ListIssues(f IssueFilter) ([]*model.Issue, error) {
@@ -166,6 +179,9 @@ func (s *Store) ListIssues(f IssueFilter) ([]*model.Issue, error) {
 		if iss.Tags == nil {
 			iss.Tags = []string{}
 		}
+		if !f.IncludeDescription {
+			iss.Description = ""
+		}
 	}
 	return out, nil
 }
@@ -174,12 +190,20 @@ func (s *Store) UpdateIssue(id int64, title, description *string, featureID **in
 	sets := []string{}
 	args := []any{}
 	if title != nil {
+		clean, err := ValidateTitle(*title, "title")
+		if err != nil {
+			return err
+		}
 		sets = append(sets, "title = ?")
-		args = append(args, *title)
+		args = append(args, clean)
 	}
 	if description != nil {
+		clean, err := ValidateBody(*description, "description", false)
+		if err != nil {
+			return err
+		}
 		sets = append(sets, "description = ?")
-		args = append(args, *description)
+		args = append(args, clean)
 	}
 	if featureID != nil {
 		sets = append(sets, "feature_id = ?")
@@ -201,6 +225,13 @@ func (s *Store) SetIssueState(id int64, state model.State) error {
 
 // SetIssueAssignee writes the assignee field. An empty string clears it.
 func (s *Store) SetIssueAssignee(id int64, assignee string) error {
+	if assignee != "" {
+		clean, err := ValidateName(assignee, "assignee")
+		if err != nil {
+			return err
+		}
+		assignee = clean
+	}
 	_, err := s.DB.Exec(`UPDATE issues SET assignee = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, assignee, id)
 	return err
 }
