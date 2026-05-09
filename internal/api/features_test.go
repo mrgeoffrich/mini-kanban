@@ -125,3 +125,244 @@ func TestFeaturesReadDoesNotWriteHistory(t *testing.T) {
 	apiGet(t, ts.URL+"/repos/MINI/features/auth")
 	assertHistoryOps(t, s, nil)
 }
+
+func TestFeatureCreateHappy(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	seedRepo(t, s)
+	resp, body := apiPost(t, ts.URL+"/repos/MINI/features",
+		`{"title":"Auth Rewrite","slug":"auth-rewrite","description":"long body"}`)
+	if resp.StatusCode != 201 {
+		t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+	}
+	for _, want := range []string{`"slug": "auth-rewrite"`, `"title": "Auth Rewrite"`, `"description": "long body"`} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("missing %s in: %s", want, body)
+		}
+	}
+	assertHistoryOps(t, s, []string{"feature.create"})
+}
+
+func TestFeatureCreateSlugAutoDerived(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	seedRepo(t, s)
+	resp, body := apiPost(t, ts.URL+"/repos/MINI/features",
+		`{"title":"Auth Rewrite"}`)
+	if resp.StatusCode != 201 {
+		t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"slug": "auth-rewrite"`) {
+		t.Fatalf("expected derived slug auth-rewrite in: %s", body)
+	}
+}
+
+func TestFeatureCreateTitleRequired(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	seedRepo(t, s)
+	resp, _ := apiPost(t, ts.URL+"/repos/MINI/features", `{}`)
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	assertHistoryOps(t, s, nil)
+}
+
+func TestFeatureCreateUnknownField(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	seedRepo(t, s)
+	resp, _ := apiPost(t, ts.URL+"/repos/MINI/features",
+		`{"title":"x","mystery":1}`)
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestFeatureCreateSlugConflict(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedFeature(t, s, repo, "auth", "Auth")
+	resp, _ := apiPost(t, ts.URL+"/repos/MINI/features",
+		`{"title":"Other","slug":"auth"}`)
+	if resp.StatusCode != 409 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestFeatureCreateRepoNotFound(t *testing.T) {
+	ts, _ := newTestAPI(t, api.Options{})
+	resp, _ := apiPost(t, ts.URL+"/repos/NONE/features", `{"title":"x"}`)
+	if resp.StatusCode != 404 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestFeatureCreateDryRunQuery(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	seedRepo(t, s)
+	resp, body := apiPost(t, ts.URL+"/repos/MINI/features?dry_run=true",
+		`{"title":"Auth"}`)
+	if resp.StatusCode != 201 || resp.Header.Get("X-Dry-Run") != "applied" {
+		t.Fatalf("status: %d, header=%q", resp.StatusCode, resp.Header.Get("X-Dry-Run"))
+	}
+	if !strings.Contains(string(body), `"slug": "auth"`) {
+		t.Fatalf("expected projected slug auth in: %s", body)
+	}
+	assertHistoryOps(t, s, nil)
+}
+
+func TestFeatureCreateDryRunHeader(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	seedRepo(t, s)
+	resp, _ := apiReq(t, "POST", ts.URL+"/repos/MINI/features",
+		`{"title":"Hdr"}`, map[string]string{"X-Dry-Run": "1"})
+	if resp.StatusCode != 201 || resp.Header.Get("X-Dry-Run") != "applied" {
+		t.Fatalf("status: %d, header=%q", resp.StatusCode, resp.Header.Get("X-Dry-Run"))
+	}
+	assertHistoryOps(t, s, nil)
+}
+
+func TestFeatureEditTitleOnly(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedFeature(t, s, repo, "auth", "Old")
+	resp, body := apiPatch(t, ts.URL+"/repos/MINI/features/auth",
+		`{"title":"New"}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"title": "New"`) {
+		t.Fatalf("body: %s", body)
+	}
+	assertHistoryOps(t, s, []string{"feature.update"})
+}
+
+func TestFeatureEditDescriptionOnly(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	if _, err := s.CreateFeature(repo.ID, "auth", "Auth", "had body"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	resp, body := apiPatch(t, ts.URL+"/repos/MINI/features/auth",
+		`{"description":"new body"}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"description": "new body"`) {
+		t.Fatalf("body: %s", body)
+	}
+}
+
+func TestFeatureEditBoth(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedFeature(t, s, repo, "auth", "Old")
+	resp, body := apiPatch(t, ts.URL+"/repos/MINI/features/auth",
+		`{"title":"New","description":"new body"}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"title": "New"`) ||
+		!strings.Contains(string(body), `"description": "new body"`) {
+		t.Fatalf("body: %s", body)
+	}
+}
+
+func TestFeatureEditNullDescriptionClears(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	if _, err := s.CreateFeature(repo.ID, "auth", "Auth", "had body"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	resp, body := apiPatch(t, ts.URL+"/repos/MINI/features/auth",
+		`{"description":null}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+	}
+	if strings.Contains(string(body), "had body") {
+		t.Fatalf("description not cleared: %s", body)
+	}
+}
+
+func TestFeatureEditTitleEmptyRejected(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedFeature(t, s, repo, "auth", "Auth")
+	resp, _ := apiPatch(t, ts.URL+"/repos/MINI/features/auth", `{"title":""}`)
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestFeatureEditTitleNullRejected(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedFeature(t, s, repo, "auth", "Auth")
+	resp, _ := apiPatch(t, ts.URL+"/repos/MINI/features/auth", `{"title":null}`)
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestFeatureEditNothingToUpdate(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedFeature(t, s, repo, "auth", "Auth")
+	resp, _ := apiPatch(t, ts.URL+"/repos/MINI/features/auth", `{}`)
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestFeatureEditUnknownField(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedFeature(t, s, repo, "auth", "Auth")
+	resp, _ := apiPatch(t, ts.URL+"/repos/MINI/features/auth",
+		`{"title":"x","mystery":1}`)
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestFeatureEditDryRun(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedFeature(t, s, repo, "auth", "Auth")
+	resp, body := apiPatch(t, ts.URL+"/repos/MINI/features/auth?dry_run=true",
+		`{"title":"projected"}`)
+	if resp.StatusCode != 200 || resp.Header.Get("X-Dry-Run") != "applied" {
+		t.Fatalf("status: %d, header=%q", resp.StatusCode, resp.Header.Get("X-Dry-Run"))
+	}
+	if !strings.Contains(string(body), `"title": "projected"`) {
+		t.Fatalf("body: %s", body)
+	}
+	assertHistoryOps(t, s, nil)
+	roundtrip, _ := s.GetFeatureBySlug(repo.ID, "auth")
+	if roundtrip.Title != "Auth" {
+		t.Fatalf("title was actually changed: %s", roundtrip.Title)
+	}
+}
+
+func TestFeatureEditURLSlugWins(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedFeature(t, s, repo, "auth", "Auth")
+	seedFeature(t, s, repo, "billing", "Billing")
+	resp, _ := apiPatch(t, ts.URL+"/repos/MINI/features/auth",
+		`{"slug":"billing","title":"renamed"}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	updatedAuth, _ := s.GetFeatureBySlug(repo.ID, "auth")
+	updatedBilling, _ := s.GetFeatureBySlug(repo.ID, "billing")
+	if updatedAuth.Title != "renamed" || updatedBilling.Title == "renamed" {
+		t.Fatalf("URL slug did not win: auth=%s billing=%s", updatedAuth.Title, updatedBilling.Title)
+	}
+}
+
+func TestFeatureEditNotFound(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	seedRepo(t, s)
+	resp, _ := apiPatch(t, ts.URL+"/repos/MINI/features/nope", `{"title":"x"}`)
+	if resp.StatusCode != 404 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}

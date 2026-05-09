@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 
+	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
+	"github.com/mrgeoffrich/mini-kanban/internal/inputio"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
@@ -58,4 +60,130 @@ func (d deps) handleFeatureShow(w http.ResponseWriter, r *http.Request) {
 		Issues:    issues,
 		Documents: docs,
 	})
+}
+
+func (d deps) handleFeatureCreate(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[inputs.FeatureAddInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	if in.Title == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input", "title is required", map[string]any{"field": "title"})
+		return
+	}
+	slug := in.Slug
+	if slug == "" {
+		slug = store.Slugify(in.Title)
+	}
+	if isDryRun(r) {
+		projected := &model.Feature{
+			RepoID:      repo.ID,
+			Slug:        slug,
+			Title:       in.Title,
+			Description: in.Description,
+		}
+		writeDryRun(w, http.StatusCreated, projected)
+		return
+	}
+	feat, err := d.store.CreateFeature(repo.ID, slug, in.Title, in.Description)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Actor:    ActorFromContext(r.Context()),
+		Op:       "feature.create",
+		Kind:     "feature",
+		TargetID: &feat.ID, TargetLabel: feat.Slug,
+		Details: feat.Title,
+	})
+	writeJSON(w, http.StatusCreated, feat)
+}
+
+func (d deps) handleFeatureEdit(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, present, err := inputio.DecodeStrict[inputs.FeatureEditInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	feat, ok := resolveFeatureOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	_ = in.Slug
+	var tPtr, dPtr *string
+	if _, ok := present["title"]; ok {
+		if in.Title == nil || *in.Title == "" {
+			writeError(w, http.StatusBadRequest, "invalid_input",
+				"title cannot be empty or null; omit the field to leave it unchanged",
+				map[string]any{"field": "title"})
+			return
+		}
+		tPtr = in.Title
+	}
+	if _, ok := present["description"]; ok {
+		if in.Description == nil {
+			empty := ""
+			dPtr = &empty
+		} else {
+			dPtr = in.Description
+		}
+	}
+	if tPtr == nil && dPtr == nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", "nothing to update", nil)
+		return
+	}
+	if isDryRun(r) {
+		projected := *feat
+		if tPtr != nil {
+			projected.Title = *tPtr
+		}
+		if dPtr != nil {
+			projected.Description = *dPtr
+		}
+		writeDryRun(w, http.StatusOK, &projected)
+		return
+	}
+	if err := d.store.UpdateFeature(feat.ID, tPtr, dPtr); err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	updated, err := d.store.GetFeatureByID(feat.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Actor:    ActorFromContext(r.Context()),
+		Op:       "feature.update",
+		Kind:     "feature",
+		TargetID: &updated.ID, TargetLabel: updated.Slug,
+		Details: updatedFieldList(map[string]bool{
+			"title":       tPtr != nil,
+			"description": dPtr != nil,
+		}),
+	})
+	writeJSON(w, http.StatusOK, updated)
 }
