@@ -2,7 +2,10 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
+	"strconv"
 	"unicode/utf8"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
@@ -406,6 +409,31 @@ func (d deps) handleDocumentRename(w http.ResponseWriter, r *http.Request) {
 		Details: details,
 	})
 	writeJSON(w, http.StatusOK, updated)
+}
+
+// handleDocumentDownload is the only non-JSON response in the API. It
+// streams the document body so `curl -O` can save a file directly. No
+// audit row, no dry-run — read-only.
+func (d deps) handleDocumentDownload(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	doc, ok := resolveDocumentOnRepo(w, r, d.store, repo, true)
+	if !ok {
+		return
+	}
+	body := []byte(doc.Content)
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	// RFC 5987 filename* is unicode-safe even if the filename contains
+	// characters a quoted ASCII filename can't represent. Pair with the
+	// quoted ASCII fallback for clients that don't understand filename*.
+	w.Header().Set("Content-Disposition",
+		fmt.Sprintf(`attachment; filename=%q; filename*=UTF-8''%s`,
+			doc.Filename, url.PathEscape(doc.Filename)))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
 }
 
 func (d deps) handleDocumentDelete(w http.ResponseWriter, r *http.Request) {
