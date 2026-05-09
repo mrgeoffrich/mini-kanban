@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
+	"github.com/mrgeoffrich/mini-kanban/internal/inputio"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
@@ -245,7 +246,7 @@ func docAddCmd() *cobra.Command {
 					"type", "content", "content-file", "from-path"); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.DocAddInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.DocAddInput](raw)
 				if err != nil {
 					return err
 				}
@@ -327,7 +328,7 @@ func docUpsertCmd() *cobra.Command {
 					"type", "content", "content-file", "from-path"); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.DocAddInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.DocAddInput](raw)
 				if err != nil {
 					return err
 				}
@@ -532,7 +533,7 @@ func docEditCmd() *cobra.Command {
 					"type", "content", "content-file"); err != nil {
 					return err
 				}
-				in, present, err := decodeStrict[inputs.DocEditInput](raw)
+				in, present, err := inputio.DecodeStrict[inputs.DocEditInput](raw)
 				if err != nil {
 					return err
 				}
@@ -660,7 +661,7 @@ func docRenameCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args, "type"); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.DocRenameInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.DocRenameInput](raw)
 				if err != nil {
 					return err
 				}
@@ -769,7 +770,7 @@ existing file at the destination is overwritten.`,
 				if err := rejectMixedInput(cmd, args, "to", "to-path"); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.DocExportInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.DocExportInput](raw)
 				if err != nil {
 					return err
 				}
@@ -874,7 +875,7 @@ func docRmCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.DocRmInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.DocRmInput](raw)
 				if err != nil {
 					return err
 				}
@@ -945,7 +946,7 @@ func docLinkCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args, "why"); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.DocLinkInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.DocLinkInput](raw)
 				if err != nil {
 					return err
 				}
@@ -1030,7 +1031,7 @@ func docUnlinkCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.DocUnlinkInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.DocUnlinkInput](raw)
 				if err != nil {
 					return err
 				}

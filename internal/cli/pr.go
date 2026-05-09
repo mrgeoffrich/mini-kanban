@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
+	"github.com/mrgeoffrich/mini-kanban/internal/inputio"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
@@ -36,7 +37,7 @@ func prAttachCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.PRAttachInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.PRAttachInput](raw)
 				if err != nil {
 					return err
 				}
@@ -107,7 +108,7 @@ func prDetachCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.PRDetachInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.PRDetachInput](raw)
 				if err != nil {
 					return err
 				}

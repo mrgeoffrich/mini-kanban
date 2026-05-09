@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
+	"github.com/mrgeoffrich/mini-kanban/internal/inputio"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 )
 
@@ -32,7 +33,7 @@ func commentAddCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args, "as", "body", "body-file"); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.CommentAddInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.CommentAddInput](raw)
 				if err != nil {
 					return err
 				}

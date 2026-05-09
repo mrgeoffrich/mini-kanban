@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
+	"github.com/mrgeoffrich/mini-kanban/internal/inputio"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
@@ -34,7 +35,7 @@ func featureAddCmd() *cobra.Command {
 					"slug", "description", "description-file"); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.FeatureAddInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.FeatureAddInput](raw)
 				if err != nil {
 					return err
 				}
@@ -171,7 +172,7 @@ func featureEditCmd() *cobra.Command {
 					"title", "description", "description-file"); err != nil {
 					return err
 				}
-				in, present, err := decodeStrict[inputs.FeatureEditInput](raw)
+				in, present, err := inputio.DecodeStrict[inputs.FeatureEditInput](raw)
 				if err != nil {
 					return err
 				}
@@ -280,7 +281,7 @@ func featureRmCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.FeatureRmInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.FeatureRmInput](raw)
 				if err != nil {
 					return err
 				}

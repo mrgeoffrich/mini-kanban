@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
+	"github.com/mrgeoffrich/mini-kanban/internal/inputio"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
@@ -32,7 +33,7 @@ func tagAddCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.TagAddInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.TagAddInput](raw)
 				if err != nil {
 					return err
 				}
@@ -66,7 +67,7 @@ func tagRmCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.TagRmInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.TagRmInput](raw)
 				if err != nil {
 					return err
 				}

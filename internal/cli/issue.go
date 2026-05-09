@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
+	"github.com/mrgeoffrich/mini-kanban/internal/inputio"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
@@ -124,7 +125,7 @@ func runIssueAdd(title, featureSlug, description, descriptionFile, stateStr stri
 }
 
 func runIssueAddJSON(raw []byte) error {
-	in, _, err := decodeStrict[inputs.IssueAddInput](raw)
+	in, _, err := inputio.DecodeStrict[inputs.IssueAddInput](raw)
 	if err != nil {
 		return err
 	}
@@ -374,7 +375,7 @@ func runIssueEdit(cmd *cobra.Command, key, title, description, descriptionFile, 
 }
 
 func runIssueEditJSON(raw []byte) error {
-	in, present, err := decodeStrict[inputs.IssueEditInput](raw)
+	in, present, err := inputio.DecodeStrict[inputs.IssueEditInput](raw)
 	if err != nil {
 		return err
 	}
@@ -483,7 +484,7 @@ func issueStateCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.IssueStateInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.IssueStateInput](raw)
 				if err != nil {
 					return err
 				}
@@ -751,7 +752,7 @@ func issueAssignCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.IssueAssignInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.IssueAssignInput](raw)
 				if err != nil {
 					return err
 				}
@@ -829,7 +830,7 @@ func issueUnassignCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.IssueUnassignInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.IssueUnassignInput](raw)
 				if err != nil {
 					return err
 				}
@@ -921,7 +922,7 @@ identity instead of the OS username.`,
 				if err := rejectMixedInput(cmd, args, "feature"); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.IssueNextInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.IssueNextInput](raw)
 				if err != nil {
 					return err
 				}
@@ -1035,7 +1036,7 @@ func issueRmCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.IssueRmInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.IssueRmInput](raw)
 				if err != nil {
 					return err
 				}

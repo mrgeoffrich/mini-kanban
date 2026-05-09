@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
+	"github.com/mrgeoffrich/mini-kanban/internal/inputio"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 )
 
@@ -39,7 +40,7 @@ func newLinkCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.LinkInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.LinkInput](raw)
 				if err != nil {
 					return err
 				}
@@ -117,7 +118,7 @@ func newUnlinkCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.UnlinkInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.UnlinkInput](raw)
 				if err != nil {
 					return err
 				}
