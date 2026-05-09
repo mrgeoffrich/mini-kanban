@@ -64,10 +64,14 @@ to require `Authorization: Bearer <token>`.
 
 The API is intended for local-only callers (web UIs, IDE plugins, agents
 that aren't a child process). Currently exposes `/healthz`, `/schema*`,
-`/repos*`, plus the full issue / comment / relation / pull-request / tag
-surface under `/repos/{prefix}/issues*`. Documents and history follow.
+`/repos*`, the full issue / comment / relation / pull-request / tag
+surface under `/repos/{prefix}/issues*`, and the feature surface under
+`/repos/{prefix}/features*` including bulk-context (`/issues/{key}/brief`),
+plan view (`/features/{slug}/plan`), and atomic claim
+(`POST /features/{slug}/next`). Documents and history follow.
 Every mutation accepts `?dry_run=true` (or `X-Dry-Run: 1`); set
-`X-Actor: <name>` so audit rows attribute correctly. See
+`X-Actor: <name>` so audit rows attribute correctly (and to claim
+work — `POST /features/{slug}/next` requires it). See
 `docs/rest-api-design.md` for the full route table.
 
 ## AI-agent integration
