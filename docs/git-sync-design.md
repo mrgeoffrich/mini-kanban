@@ -475,6 +475,18 @@ the user runs `mk` from inside the matching project's working tree:
 `resolveRepo()` finds an existing row by uuid (read from `repo.yaml`),
 populates `path`, and the row stops being phantom.
 
+**Shipped (Phase 4):** `resolveRepo()` does not in fact match by
+`repo.yaml` uuid — that file lives in the sync repo, not the project
+repo, and `resolveRepo` runs on a project working tree without
+opening any sync layer. Instead, the upgrade matches a phantom row's
+`remote_url` against the project repo's `git remote get-url origin`
+output. This catches the common case (phantom's remote was set when
+some other client first exported the project) without requiring the
+project repo to know where the local sync clone lives. The upgrade
+records a `repo.upgrade_phantom` audit op so the silent-mutation
+concern from open question #7 is at least observable in the audit
+log. See `internal/cli/context.go`'s `matchPhantomByRemote`.
+
 ### Bootstrap and first sync
 
 The first time data flows between a DB and a sync repo is the most
@@ -591,6 +603,16 @@ With collision handling real, the `next_issue_number` column on `repos`
 is just a cache for `max(number) + 1`. Keep it for the fast path (avoids
 a `MAX()` query on every issue create), but **always recompute on import**
 so a remotely-created MINI-50 doesn't get re-used locally as MINI-50.
+
+**Shipped (Phase 3):** `RecomputeNextIssueNumber` in
+`internal/store/repos.go` is a high-water-mark, not a strict
+`MAX(number)+1` reset. It only bumps the counter forward —
+`next_issue_number = max(current, MAX(number) + 1)`. The deliberate
+deviation: a hand-edited DB that shrinks the issue set (e.g. dev
+ran `mk issue rm MINI-50` between syncs) shouldn't reuse the freed
+number on the next sync, because external systems may already cite
+it. The cache only goes up. This is consistent with the existing mk
+guarantee that "issue numbers never repeat" (see SKILL.md gotcha).
 
 ## Edge cases
 
@@ -758,6 +780,11 @@ on the remote.
    `history` row of op `sync` per run, plus per-renumber/rename
    sub-ops. Per the existing pattern in `internal/cli/audit.go`, this
    is one `recordOp` call per logical action.
+   **Shipped (Phase 4):** dotted op names —
+   `sync.run`, `sync.import`, `sync.export`, `sync.renumber`,
+   `sync.rename`, `sync.delete`, `sync.init`, `sync.clone`,
+   `repo.upgrade_phantom`. See `internal/cli/sync.go`'s
+   `recordSyncImportOps`.
 6. **What goes in `mk-sync.yaml` beyond `schema_version` and `created_at`?**
    Probably nothing in v1. Candidates for later: advisory list of
    expected prefixes, originating mk version. The repo's own uuid
@@ -770,6 +797,24 @@ on the remote.
    Option (a) is the principle-of-least-surprise default but means a
    `cd` into a project's directory silently mutates DB state. Probably
    fine, but worth deciding before shipping.
+   **Decided (Phase 4): option (a), keyed by `git remote get-url
+   origin` matching the phantom row's `remote_url`.** A
+   `repo.upgrade_phantom` audit op records the upgrade so the silent
+   mutation is at least observable in `mk history`. An explicit
+   `mk sync attach` is left for later if the auto-match's heuristic
+   needs a manual override.
+8. **Push-retry policy on non-fast-forward.**
+   **Decided (Phase 4): hardcoded to one retry** (`MaxPushRetries =
+   1` in `internal/sync/run.go`). A non-fast-forward push triggers
+   pull → re-import → re-export → one re-push. Configurability is
+   out of scope for v1; revisit if observed in practice.
+9. **Process lock on Windows.**
+   **Decided (Phase 4): no-op with a stderr warning.** mk hasn't been
+   tested on Windows in earnest and `LockFileEx` plumbing wasn't
+   worth holding the feature for. The lock is real on Unix
+   (`unix.Flock` on `<dbPath>.sync.lock`), Windows users currently
+   trust their own concurrency. Replace with a real lock if a
+   Windows user ever reports the race.
 
 ## Implementation phasing
 
@@ -802,3 +847,10 @@ The work is naturally staged. Each step is independently shippable.
 
 Steps 1 and 2 can be merged independently. Steps 3 and 4 are tightly
 coupled and probably want to land together.
+
+**Shipped:** the work landed in five phases rather than six —
+`docs/git-sync-implementation.md` is the canonical phased plan; the
+"comment filename scheme + timestamps" item from this doc was folded
+into Phase 2's emitter work. Phase 5 (`mk sync verify` + `mk sync
+inspect` + this documentation pass) replaces the original "step 6"
+documentation-only phase.
