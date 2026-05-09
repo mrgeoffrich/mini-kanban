@@ -96,6 +96,33 @@ func (c *localClient) EnsureRepo(ctx context.Context, info *git.Info) (*model.Re
 	if !errors.Is(err, store.ErrNotFound) {
 		return nil, false, err
 	}
+	// Phantom-upgrade: a phantom row with this remote_url is the
+	// matching project for this working tree (sync brought the
+	// metadata in earlier). Upgrade rather than create a duplicate.
+	// Mirrors the CLI's resolveRepo behaviour for the same reason.
+	if info.RemoteURL != "" {
+		repos, lerr := c.store.ListRepos()
+		if lerr == nil {
+			for _, r := range repos {
+				if r.Path == "" && r.RemoteURL == info.RemoteURL {
+					if err := c.store.UpgradePhantomRepo(r.UUID, info.Root); err != nil {
+						return nil, false, fmt.Errorf("upgrade phantom %s: %w", r.Prefix, err)
+					}
+					c.recordOp(model.HistoryEntry{
+						RepoID: &r.ID, RepoPrefix: r.Prefix,
+						Op: "repo.upgrade_phantom", Kind: "repo",
+						TargetID: &r.ID, TargetLabel: r.Prefix,
+						Details: fmt.Sprintf("path=%s", info.Root),
+					})
+					upgraded, err := c.store.GetRepoByID(r.ID)
+					if err != nil {
+						return nil, false, err
+					}
+					return upgraded, false, nil
+				}
+			}
+		}
+	}
 	prefix, err := c.store.AllocatePrefix(info.Name)
 	if err != nil {
 		return nil, false, fmt.Errorf("allocate prefix: %w", err)

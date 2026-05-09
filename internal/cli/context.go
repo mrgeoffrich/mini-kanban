@@ -10,7 +10,17 @@ import (
 	"github.com/mrgeoffrich/mini-kanban/internal/git"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
+	"github.com/mrgeoffrich/mini-kanban/internal/sync"
 )
+
+// errSyncRepoMode signals that the current working tree is the root
+// of an mk sync repo (an mk-sync.yaml lives there). Tracking commands
+// (mk issue create, mk feature edit, …) should refuse and surface this
+// error verbatim so the user gets a clear message and AI agents can
+// branch on the sentinel. Sync-admin commands (mk sync verify / inspect,
+// landing in Phase 5) can detect this error and switch to sync-repo
+// mode instead.
+var errSyncRepoMode = errors.New("this is an mk sync repo (mk-sync.yaml at root); cd to your project repo to track issues")
 
 // auto-register a repo on first use. Each call site records its own
 // history once we get a repo back.
@@ -77,12 +87,37 @@ func resolveRepo(s *store.Store) (*model.Repo, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Refuse to auto-register a sync repo as a project. The sentinel
+	// (mk-sync.yaml at the working-tree root) is the canonical signal.
+	// Sync-admin commands handle this error explicitly; everything
+	// else lets it bubble up to the user.
+	if sync.IsSyncRepo(info.Root) {
+		return nil, errSyncRepoMode
+	}
 	repo, err := s.GetRepoByPath(info.Root)
 	if err == nil {
 		return repo, nil
 	}
 	if !errors.Is(err, store.ErrNotFound) {
 		return nil, err
+	}
+	// Before allocating a fresh prefix, see if this working tree is
+	// the matching project for a phantom repo (a row with path = '',
+	// imported from sync). Match by remote_url — the only natural
+	// identifier shared between project repo and sync-repo
+	// repo.yaml. If found, upgrade in place rather than creating a
+	// duplicate row.
+	if phantom, ok := matchPhantomByRemote(s, info.RemoteURL); ok {
+		if err := s.UpgradePhantomRepo(phantom.UUID, info.Root); err != nil {
+			return nil, fmt.Errorf("upgrade phantom %s: %w", phantom.Prefix, err)
+		}
+		recordOp(s, model.HistoryEntry{
+			RepoID: &phantom.ID, RepoPrefix: phantom.Prefix,
+			Op: "repo.upgrade_phantom", Kind: "repo",
+			TargetID: &phantom.ID, TargetLabel: phantom.Prefix,
+			Details: fmt.Sprintf("path=%s", info.Root),
+		})
+		return s.GetRepoByID(phantom.ID)
 	}
 	prefix, err := s.AllocatePrefix(info.Name)
 	if err != nil {
@@ -101,6 +136,31 @@ func resolveRepo(s *store.Store) (*model.Repo, error) {
 	return created, nil
 }
 
+// matchPhantomByRemote looks for a phantom repo (path = '') whose
+// remote_url matches the supplied URL. Returns the matched repo and
+// true on hit, otherwise (nil, false). Empty remote URLs never match
+// — pairing two repos that just happen to be both remoteless would
+// be a worse failure mode than auto-registering a fresh prefix.
+//
+// Lives next to resolveRepo because it's specific to the
+// phantom-upgrade flow at the project<->sync seam; promoting it to
+// the store layer is fine if more callers ever need it.
+func matchPhantomByRemote(s *store.Store, remoteURL string) (*model.Repo, bool) {
+	if remoteURL == "" {
+		return nil, false
+	}
+	repos, err := s.ListRepos()
+	if err != nil {
+		return nil, false
+	}
+	for _, r := range repos {
+		if r.Path == "" && r.RemoteURL == remoteURL {
+			return r, true
+		}
+	}
+	return nil, false
+}
+
 // resolveRepoC resolves the repo for CWD via the Client abstraction so
 // the same auto-register behaviour works in both local and remote
 // modes. Local backend writes the audit row inline; remote backend
@@ -113,6 +173,12 @@ func resolveRepoC(c client.Client) (*model.Repo, error) {
 	info, err := git.Detect(cwd)
 	if err != nil {
 		return nil, err
+	}
+	// Refuse to auto-register a sync repo as a project. Mirrors
+	// resolveRepo's check; protects every command that goes through
+	// the client abstraction (mk issue, mk feature, mk doc, …).
+	if sync.IsSyncRepo(info.Root) {
+		return nil, errSyncRepoMode
 	}
 	repo, _, err := c.EnsureRepo(context.Background(), info)
 	return repo, err
