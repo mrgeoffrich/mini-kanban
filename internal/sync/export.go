@@ -56,8 +56,10 @@ func (e *Engine) Export(ctx context.Context, target string) (*ExportResult, erro
 		return nil, fmt.Errorf("list issues: %w", err)
 	}
 	issueByID := make(map[int64]*model.Issue, len(allIssues))
+	uuidByKey := make(map[string]string, len(allIssues))
 	for _, iss := range allIssues {
 		issueByID[iss.ID] = iss
+		uuidByKey[iss.Key] = iss.UUID
 	}
 
 	repos, err := e.Store.ListRepos()
@@ -72,7 +74,7 @@ func (e *Engine) Export(ctx context.Context, target string) (*ExportResult, erro
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if err := e.exportRepo(w, repo, issueByID, res); err != nil {
+		if err := e.exportRepo(w, repo, issueByID, uuidByKey, res); err != nil {
 			return nil, fmt.Errorf("export repo %s: %w", repo.Prefix, err)
 		}
 		res.Repos++
@@ -87,7 +89,7 @@ func (e *Engine) Export(ctx context.Context, target string) (*ExportResult, erro
 // folder underneath it. Features must be exported before issues so the
 // feature-uuid lookup is populated for the issues' `feature` field —
 // although in practice we just build the map before either pass.
-func (e *Engine) exportRepo(w *exportWriter, repo *model.Repo, issueByID map[int64]*model.Issue, res *ExportResult) error {
+func (e *Engine) exportRepo(w *exportWriter, repo *model.Repo, issueByID map[int64]*model.Issue, uuidByKey map[string]string, res *ExportResult) error {
 	// repo.yaml
 	repoYAML, err := buildRepoYAML(repo)
 	if err != nil {
@@ -129,7 +131,7 @@ func (e *Engine) exportRepo(w *exportWriter, repo *model.Repo, issueByID map[int
 	}
 
 	for _, iss := range issues {
-		comments, err := e.exportIssue(w, repo, iss, featureByID, issueByID)
+		comments, err := e.exportIssue(w, repo, iss, featureByID, uuidByKey)
 		if err != nil {
 			return fmt.Errorf("issue %s: %w", iss.Key, err)
 		}
@@ -192,7 +194,7 @@ func (e *Engine) exportIssue(
 	repo *model.Repo,
 	iss *model.Issue,
 	featureByID map[int64]*model.Feature,
-	issueByID map[int64]*model.Issue,
+	uuidByKey map[string]string,
 ) (int, error) {
 	folder := IssueFolder(repo.Prefix, iss.Number)
 	descPath := IssueDescriptionFile(folder)
@@ -219,7 +221,7 @@ func (e *Engine) exportIssue(
 		{"description_hash", Str(descHash)},
 		{"number", Int(iss.Number)},
 		{"prs", emitPRs(prs)},
-		{"relations", emitRelations(relations, issueByID)},
+		{"relations", emitRelations(relations, uuidByKey)},
 		{"state", Str(string(iss.State))},
 		{"tags", emitTags(iss.Tags)},
 		{"title", Str(iss.Title)},
@@ -383,7 +385,7 @@ func emitPRs(prs []*model.PullRequest) Node {
 // The map structure is fixed: every kind always appears, with an empty
 // list when there are no edges of that kind. This keeps the schema
 // predictable for downstream consumers.
-func emitRelations(rel *IssueRelations, issueByID map[int64]*model.Issue) Node {
+func emitRelations(rel *IssueRelations, uuidByKey map[string]string) Node {
 	buckets := map[model.RelationType][]Node{
 		model.RelBlocks:      {},
 		model.RelRelatesTo:   {},
@@ -391,10 +393,9 @@ func emitRelations(rel *IssueRelations, issueByID map[int64]*model.Issue) Node {
 	}
 	if rel != nil {
 		for _, r := range rel.Outgoing {
-			uuid := lookupUUIDByKey(issueByID, r.ToIssue)
 			buckets[r.Type] = append(buckets[r.Type], Map(
 				Pair{"label", Str(r.ToIssue)},
-				Pair{"uuid", Str(uuid)},
+				Pair{"uuid", Str(uuidByKey[r.ToIssue])},
 			))
 		}
 	}
@@ -487,19 +488,6 @@ func nodeStringField(n Node, key string) string {
 	for _, p := range n.pairs {
 		if p.key == key && p.val.kind == kindStr {
 			return p.val.str
-		}
-	}
-	return ""
-}
-
-// lookupUUIDByKey resolves "MINI-7" → uuid by linear-scanning the
-// global issue map. The map is keyed by id rather than key so we can't
-// do a direct lookup; for the volumes mk targets (thousands of issues)
-// the linear scan is fine.
-func lookupUUIDByKey(issueByID map[int64]*model.Issue, key string) string {
-	for _, iss := range issueByID {
-		if iss.Key == key {
-			return iss.UUID
 		}
 	}
 	return ""
