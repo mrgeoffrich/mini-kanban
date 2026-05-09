@@ -64,6 +64,8 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("POST /repos/{prefix}/documents", d.handleDocumentCreate)
 	mux.HandleFunc("GET /repos/{prefix}/documents/{filename}", d.handleDocumentShow)
 	mux.HandleFunc("PUT /repos/{prefix}/documents/{filename}", d.handleDocumentUpsert)
+	mux.HandleFunc("PATCH /repos/{prefix}/documents/{filename}", d.handleDocumentEdit)
+	mux.HandleFunc("POST /repos/{prefix}/documents/{filename}/rename", d.handleDocumentRename)
 
 	// Outermost first: panic recovery wraps everything so a bug in any
 	// later layer still returns a 500 envelope.

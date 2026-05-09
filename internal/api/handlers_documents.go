@@ -227,6 +227,187 @@ func (d deps) handleDocumentUpsert(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, updated)
 }
 
+func (d deps) handleDocumentEdit(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	doc, ok := resolveDocumentOnRepo(w, r, d.store, repo, false)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, present, err := inputio.DecodeStrict[inputs.DocEditInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	_ = in.Filename // URL filename always wins; ignore body
+	var (
+		newType    *model.DocumentType
+		newContent *string
+	)
+	if _, ok := present["type"]; ok {
+		if in.Type == nil || *in.Type == "" {
+			writeError(w, http.StatusBadRequest, "invalid_input",
+				"type cannot be empty or null; omit the field to leave it unchanged",
+				map[string]any{"field": "type"})
+			return
+		}
+		t, err := model.ParseDocumentType(*in.Type)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "type"})
+			return
+		}
+		newType = &t
+	}
+	if _, ok := present["content"]; ok {
+		body := ""
+		if in.Content != nil {
+			body = *in.Content
+		}
+		if !utf8.ValidString(body) {
+			writeError(w, http.StatusBadRequest, "invalid_input",
+				"document is not valid UTF-8 text; only text documents are supported",
+				map[string]any{"field": "content"})
+			return
+		}
+		newContent = &body
+	}
+	if newType == nil && newContent == nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", "nothing to update", nil)
+		return
+	}
+	if isDryRun(r) {
+		projected := *doc
+		if newType != nil {
+			projected.Type = *newType
+		}
+		if newContent != nil {
+			projected.SizeBytes = int64(len(*newContent))
+		}
+		writeDryRun(w, http.StatusOK, &projected)
+		return
+	}
+	if err := d.store.UpdateDocument(doc.ID, newType, newContent, nil); err != nil {
+		s, c := statusForError(err)
+		writeError(w, s, c, err.Error(), nil)
+		return
+	}
+	updated, err := d.store.GetDocumentByID(doc.ID, false)
+	if err != nil {
+		s, c := statusForError(err)
+		writeError(w, s, c, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Actor:    ActorFromContext(r.Context()),
+		Op:       "document.update",
+		Kind:     "document",
+		TargetID: &updated.ID, TargetLabel: updated.Filename,
+		Details: updatedFieldList(map[string]bool{
+			"type":    newType != nil,
+			"content": newContent != nil,
+		}),
+	})
+	writeJSON(w, http.StatusOK, updated)
+}
+
+func (d deps) handleDocumentRename(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[inputs.DocRenameInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	in.OldFilename = r.PathValue("filename") // URL wins
+	if in.NewFilename == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input", "new_filename is required", map[string]any{"field": "new_filename"})
+		return
+	}
+	oldName, err := store.ValidateDocFilenameStrict(in.OldFilename)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "filename"})
+		return
+	}
+	newName, err := store.ValidateDocFilenameStrict(in.NewFilename)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "new_filename"})
+		return
+	}
+	if oldName == newName && in.Type == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input", "nothing to rename: old and new filenames are identical", nil)
+		return
+	}
+	var newType *model.DocumentType
+	if in.Type != "" {
+		t, err := model.ParseDocumentType(in.Type)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "type"})
+			return
+		}
+		newType = &t
+	}
+	doc, err := d.store.GetDocumentByFilename(repo.ID, oldName, false)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "document not found", nil)
+			return
+		}
+		s, c := statusForError(err)
+		writeError(w, s, c, err.Error(), nil)
+		return
+	}
+	if isDryRun(r) {
+		projected := *doc
+		projected.Filename = newName
+		if newType != nil {
+			projected.Type = *newType
+		}
+		writeDryRun(w, http.StatusOK, &projected)
+		return
+	}
+	if err := d.store.RenameDocument(doc.ID, newName, newType); err != nil {
+		if errors.Is(err, store.ErrDocumentExists) {
+			writeError(w, http.StatusConflict, "conflict", err.Error(), nil)
+			return
+		}
+		s, c := statusForError(err)
+		writeError(w, s, c, err.Error(), nil)
+		return
+	}
+	updated, err := d.store.GetDocumentByID(doc.ID, false)
+	if err != nil {
+		s, c := statusForError(err)
+		writeError(w, s, c, err.Error(), nil)
+		return
+	}
+	details := oldName + " → " + newName
+	if newType != nil {
+		details += " type=" + string(*newType)
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Actor:    ActorFromContext(r.Context()),
+		Op:       "document.rename",
+		Kind:     "document",
+		TargetID: &updated.ID, TargetLabel: updated.Filename,
+		Details: details,
+	})
+	writeJSON(w, http.StatusOK, updated)
+}
+
 // resolvedDocCreate is the validated tuple that document create/upsert
 // hand off to the store.
 type resolvedDocCreate struct {

@@ -358,6 +358,140 @@ func TestDocumentUpsertReplaces(t *testing.T) {
 	assertHistoryOps(t, s, []string{"document.update"})
 }
 
+func TestDocumentEditTypeOnly(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "BODY")
+	body := map[string]any{"type": "architecture"}
+	resp, _ := apiPatch(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md", body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	got, _ := s.GetDocumentByFilename(repo.ID, "x.md", true)
+	if got.Type != model.DocTypeArchitecture || got.Content != "BODY" {
+		t.Fatalf("got: %+v", got)
+	}
+}
+
+func TestDocumentEditContentOnly(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "OLD")
+	body := map[string]any{"content": "NEW"}
+	resp, _ := apiPatch(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md", body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	got, _ := s.GetDocumentByFilename(repo.ID, "x.md", true)
+	if got.Content != "NEW" || got.Type != model.DocTypeDesigns {
+		t.Fatalf("got: %+v", got)
+	}
+}
+
+func TestDocumentEditBoth(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "OLD")
+	body := map[string]any{"type": "architecture", "content": "NEW"}
+	resp, _ := apiPatch(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md", body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestDocumentEditNullContentClears(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "OLD")
+	resp, _ := apiPatch(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md",
+		`{"content": null}`)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	got, _ := s.GetDocumentByFilename(repo.ID, "x.md", true)
+	if got.Content != "" {
+		t.Fatalf("expected cleared, got: %q", got.Content)
+	}
+}
+
+func TestDocumentEditNullTypeRejected(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "OLD")
+	resp, _ := apiPatch(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md",
+		`{"type": null}`)
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestDocumentEditUnknownField(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "OLD")
+	resp, _ := apiPatch(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md",
+		map[string]any{"type": "designs", "nope": 1})
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestDocumentEditDryRun(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "x.md", model.DocTypeDesigns, "OLD")
+	resp, _ := apiPatch(t, ts.URL+"/repos/"+repo.Prefix+"/documents/x.md?dry_run=true",
+		map[string]any{"type": "architecture"})
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	got, _ := s.GetDocumentByFilename(repo.ID, "x.md", false)
+	if got.Type != model.DocTypeDesigns {
+		t.Fatalf("dry-run mutated: %+v", got)
+	}
+}
+
+func TestDocumentRenameHappy(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "old.md", model.DocTypeDesigns, "B")
+	body := map[string]any{"new_filename": "new.md"}
+	resp, _ := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/documents/old.md/rename", body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	if _, err := s.GetDocumentByFilename(repo.ID, "new.md", false); err != nil {
+		t.Fatalf("not renamed: %v", err)
+	}
+	assertHistoryOps(t, s, []string{"document.rename"})
+}
+
+func TestDocumentRenameCollision(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "old.md", model.DocTypeDesigns, "A")
+	seedDocument(t, s, repo, "taken.md", model.DocTypeDesigns, "B")
+	body := map[string]any{"new_filename": "taken.md"}
+	resp, _ := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/documents/old.md/rename", body)
+	if resp.StatusCode != 409 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestDocumentRenameDryRun(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "old.md", model.DocTypeDesigns, "B")
+	body := map[string]any{"new_filename": "new.md"}
+	resp, _ := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/documents/old.md/rename?dry_run=true", body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	if _, err := s.GetDocumentByFilename(repo.ID, "old.md", false); err != nil {
+		t.Fatalf("dry-run mutated: %v", err)
+	}
+}
+
 func TestDocumentUpsertURLFilenameWins(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
