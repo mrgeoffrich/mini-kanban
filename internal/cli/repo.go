@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -17,12 +18,12 @@ func repoListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List all tracked repos",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStore()
+			c, err := openClient()
 			if err != nil {
 				return err
 			}
-			defer s.Close()
-			repos, err := s.ListRepos()
+			defer c.Close()
+			repos, err := c.ListRepos(context.Background())
 			if err != nil {
 				return err
 			}
@@ -37,19 +38,19 @@ func repoShowCmd() *cobra.Command {
 		Short: "Show details for a repo (defaults to current directory)",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStore()
+			c, err := openClient()
 			if err != nil {
 				return err
 			}
-			defer s.Close()
+			defer c.Close()
 			if len(args) == 1 {
-				repo, err := s.GetRepoByPrefix(strings.ToUpper(args[0]))
+				repo, err := c.GetRepoByPrefix(context.Background(), strings.ToUpper(args[0]))
 				if err != nil {
 					return err
 				}
 				return emit(repo)
 			}
-			repo, err := resolveRepo(s)
+			repo, err := resolveRepoC(c)
 			if err != nil {
 				return err
 			}

@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/tui"
@@ -28,6 +30,9 @@ Snapshot targets:
                                             first item in that tab
   picker                                  — board column-visibility picker`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if inRemoteMode() {
+				return fmt.Errorf("mk tui: not supported in remote mode (TUI talks to SQLite directly); start the TUI against a local DB")
+			}
 			s, err := openStore()
 			if err != nil {
 				return err

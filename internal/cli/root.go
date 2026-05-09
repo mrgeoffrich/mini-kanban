@@ -16,6 +16,8 @@ type globalOpts struct {
 	dbPath string
 	user   string
 	dryRun bool
+	remote string
+	token  string
 }
 
 var opts = globalOpts{output: outputText}
@@ -34,6 +36,8 @@ func NewRoot() *cobra.Command {
 	root.PersistentFlags().StringVar(&opts.dbPath, "db", "", "override database path (default: ~/.mini-kanban/db.sqlite)")
 	root.PersistentFlags().StringVar(&opts.user, "user", "", "actor name recorded in history (defaults to OS user; AI agents must pass this explicitly)")
 	root.PersistentFlags().BoolVar(&opts.dryRun, "dry-run", false, "validate the request and emit the projected result without writing to the database (no audit log entry)")
+	root.PersistentFlags().StringVar(&opts.remote, "remote", "", "talk to an mk api server at this URL instead of the local DB; falls back to MK_REMOTE")
+	root.PersistentFlags().StringVar(&opts.token, "token", "", "bearer token for the remote API; falls back to MK_API_TOKEN")
 
 	root.AddCommand(
 		newInitCmd(),
@@ -49,6 +53,7 @@ func NewRoot() *cobra.Command {
 		newStatusCmd(),
 		newHistoryCmd(),
 		newSchemaCmd(),
+		newAPICmd(),
 		newInstallSkillCmd(),
 		newTUICmd(),
 	)

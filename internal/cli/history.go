@@ -1,71 +1,16 @@
 package cli
 
 import (
+	"context"
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
+	"github.com/mrgeoffrich/mini-kanban/internal/timeparse"
 )
-
-// parseLookback extends time.ParseDuration with day (d) and week (w) units.
-// Examples: 30m, 1h, 6h, 1d, 7d, 2w. Single-unit only for d/w; multi-unit
-// composites use Go's native parser.
-func parseLookback(s string) (time.Duration, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0, fmt.Errorf("duration is required (e.g. 30m, 1h, 1d, 2w)")
-	}
-	last := s[len(s)-1]
-	switch last {
-	case 'd', 'w':
-		n, err := strconv.Atoi(s[:len(s)-1])
-		if err != nil || n < 0 {
-			return 0, fmt.Errorf("invalid duration %q (e.g. 1d, 2w)", s)
-		}
-		mult := 24 * time.Hour
-		if last == 'w' {
-			mult = 7 * 24 * time.Hour
-		}
-		return time.Duration(n) * mult, nil
-	}
-	d, err := time.ParseDuration(s)
-	if err != nil {
-		return 0, fmt.Errorf("invalid duration %q (e.g. 30m, 1h, 1d, 2w)", s)
-	}
-	return d, nil
-}
-
-// parseTimestamp accepts several common shapes and returns a UTC time.
-// Date-only and bare datetimes are interpreted in the user's local
-// timezone; RFC 3339 inputs honour the offset they specify.
-//
-// Accepted: 2006-01-02 | 2006-01-02 15:04 | 2006-01-02 15:04:05 |
-//
-//	2006-01-02T15:04:05 | RFC3339 (e.g. 2026-05-03T07:27:14Z).
-func parseTimestamp(s string) (time.Time, error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return time.Time{}, fmt.Errorf("timestamp is required")
-	}
-	formats := []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02T15:04:05",
-		"2006-01-02 15:04:05",
-		"2006-01-02 15:04",
-		"2006-01-02",
-	}
-	for _, f := range formats {
-		if t, err := time.ParseInLocation(f, s, time.Local); err == nil {
-			return t.UTC(), nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("invalid timestamp %q (try YYYY-MM-DD, YYYY-MM-DD HH:MM, or RFC 3339)", s)
-}
 
 func newHistoryCmd() *cobra.Command {
 	var (
@@ -97,11 +42,11 @@ Time inputs:
 			if sinceStr != "" && fromStr != "" {
 				return fmt.Errorf("--since and --from are mutually exclusive")
 			}
-			s, err := openStore()
+			c, err := openClient()
 			if err != nil {
 				return err
 			}
-			defer s.Close()
+			defer c.Close()
 
 			f := store.HistoryFilter{
 				Limit:       limit,
@@ -111,15 +56,15 @@ Time inputs:
 				Kind:        kindFilter,
 				OldestFirst: oldestFirst,
 			}
+			var repo *model.Repo
 			if !allRepos {
-				repo, err := resolveRepo(s)
+				repo, err = resolveRepoC(c)
 				if err != nil {
 					return err
 				}
-				f.RepoID = &repo.ID
 			}
 			if sinceStr != "" {
-				d, err := parseLookback(sinceStr)
+				d, err := timeparse.Lookback(sinceStr)
 				if err != nil {
 					return err
 				}
@@ -127,14 +72,14 @@ Time inputs:
 				f.From = &cutoff
 			}
 			if fromStr != "" {
-				t, err := parseTimestamp(fromStr)
+				t, err := timeparse.Timestamp(fromStr)
 				if err != nil {
 					return fmt.Errorf("--from: %w", err)
 				}
 				f.From = &t
 			}
 			if toStr != "" {
-				t, err := parseTimestamp(toStr)
+				t, err := timeparse.Timestamp(toStr)
 				if err != nil {
 					return fmt.Errorf("--to: %w", err)
 				}
@@ -143,7 +88,7 @@ Time inputs:
 			if f.From != nil && f.To != nil && f.To.Before(*f.From) {
 				return fmt.Errorf("--to (%s) must not be before --from (%s)", f.To.Local(), f.From.Local())
 			}
-			entries, err := s.ListHistory(f)
+			entries, err := c.ListHistory(context.Background(), repo, f)
 			if err != nil {
 				return err
 			}

@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 
+	"github.com/mrgeoffrich/mini-kanban/internal/client"
 	"github.com/mrgeoffrich/mini-kanban/internal/git"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
@@ -26,8 +28,46 @@ func openStore() (*store.Store, error) {
 	return store.Open(path)
 }
 
+// remoteURL returns the configured remote URL, falling back to
+// MK_REMOTE so callers can switch backends per-shell without retyping
+// the flag on every command.
+func remoteURL() string {
+	if opts.remote != "" {
+		return opts.remote
+	}
+	return os.Getenv("MK_REMOTE")
+}
+
+// apiToken returns the bearer token for the remote API, falling back
+// to MK_API_TOKEN.
+func apiToken() string {
+	if opts.token != "" {
+		return opts.token
+	}
+	return os.Getenv("MK_API_TOKEN")
+}
+
+// openClient wires up the right backend (local SQLite or remote HTTP).
+// Replaces openStore() at every CLI handler call site as Phase 6
+// migrates them. Defer c.Close() in the same way you would the store.
+func openClient() (client.Client, error) {
+	return client.Open(context.Background(), client.Options{
+		DBPath: opts.dbPath,
+		Remote: remoteURL(),
+		Token:  apiToken(),
+		Actor:  actor(),
+	})
+}
+
+// inRemoteMode reports whether the CLI is configured to talk to a
+// remote `mk api` server. Used by local-only verbs to short-circuit
+// with a clear error.
+func inRemoteMode() bool { return remoteURL() != "" }
+
 // resolveRepo finds the repo row for the current working directory, creating
-// it on first use. Errors out if not inside a git repo.
+// it on first use. Errors out if not inside a git repo. Used by handlers
+// that haven't migrated to the client yet; new code should prefer
+// resolveRepoC.
 func resolveRepo(s *store.Store) (*model.Repo, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -59,4 +99,21 @@ func resolveRepo(s *store.Store) (*model.Repo, error) {
 		Details: "auto-registered (" + created.Name + ")",
 	})
 	return created, nil
+}
+
+// resolveRepoC resolves the repo for CWD via the Client abstraction so
+// the same auto-register behaviour works in both local and remote
+// modes. Local backend writes the audit row inline; remote backend
+// triggers the server's POST /repos which writes the row server-side.
+func resolveRepoC(c client.Client) (*model.Repo, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	info, err := git.Detect(cwd)
+	if err != nil {
+		return nil, err
+	}
+	repo, _, err := c.EnsureRepo(context.Background(), info)
+	return repo, err
 }

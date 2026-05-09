@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
+	"github.com/mrgeoffrich/mini-kanban/internal/client"
+	"github.com/mrgeoffrich/mini-kanban/internal/inputio"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
@@ -31,41 +34,6 @@ func newIssueCmd() *cobra.Command {
 	return cmd
 }
 
-// resolveIssueByKey resolves "MINI-42" or just "42" (relative to current repo).
-func resolveIssueByKey(s *store.Store, key string) (*model.Issue, error) {
-	key = strings.TrimSpace(key)
-	if !strings.Contains(key, "-") {
-		repo, err := resolveRepo(s)
-		if err != nil {
-			return nil, err
-		}
-		var n int64
-		if _, err := fmt.Sscanf(key, "%d", &n); err != nil {
-			return nil, fmt.Errorf("invalid issue reference %q", key)
-		}
-		return s.GetIssueByKey(repo.Prefix, n)
-	}
-	prefix, num, err := store.ParseIssueKey(key)
-	if err != nil {
-		return nil, err
-	}
-	return s.GetIssueByKey(prefix, num)
-}
-
-// resolveIssueKeyStrict is the JSON-path equivalent of resolveIssueByKey: it
-// requires the canonical "PREFIX-N" form and refuses bare-number references.
-// Agents shouldn't be guessing the current repo's prefix.
-func resolveIssueKeyStrict(s *store.Store, key string) (*model.Issue, error) {
-	key = strings.TrimSpace(key)
-	if !strings.Contains(key, "-") {
-		return nil, fmt.Errorf("issue key %q must be canonical (e.g. \"MINI-42\")", key)
-	}
-	prefix, num, err := store.ParseIssueKey(key)
-	if err != nil {
-		return nil, err
-	}
-	return s.GetIssueByKey(prefix, num)
-}
 
 func issueAddCmd() *cobra.Command {
 	var (
@@ -109,88 +77,40 @@ func runIssueAdd(title, featureSlug, description, descriptionFile, stateStr stri
 	if err != nil {
 		return err
 	}
-	state := model.StateBacklog
-	if stateStr != "" {
-		state, err = model.ParseState(stateStr)
-		if err != nil {
-			return err
-		}
-	}
-	cleanTags, err := store.NormalizeTags(tags)
-	if err != nil {
-		return err
-	}
-	return createIssue(title, featureSlug, desc, state, cleanTags)
+	return createIssue(inputs.IssueAddInput{
+		Title:       title,
+		FeatureSlug: featureSlug,
+		Description: desc,
+		State:       stateStr,
+		Tags:        tags,
+	})
 }
 
 func runIssueAddJSON(raw []byte) error {
-	in, _, err := decodeStrict[inputs.IssueAddInput](raw)
+	in, _, err := inputio.DecodeStrict[inputs.IssueAddInput](raw)
 	if err != nil {
 		return err
 	}
-	if in.Title == "" {
-		return fmt.Errorf("title is required")
-	}
-	state := model.StateBacklog
-	if in.State != "" {
-		st, err := model.ParseState(in.State)
-		if err != nil {
-			return err
-		}
-		state = st
-	}
-	cleanTags, err := store.NormalizeTags(in.Tags)
-	if err != nil {
-		return err
-	}
-	return createIssue(in.Title, in.FeatureSlug, in.Description, state, cleanTags)
+	return createIssue(*in)
 }
 
-func createIssue(title, featureSlug, description string, state model.State, tags []string) error {
-	s, err := openStore()
+func createIssue(in inputs.IssueAddInput) error {
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	repo, err := resolveRepo(s)
+	defer c.Close()
+	repo, err := resolveRepoC(c)
 	if err != nil {
 		return err
 	}
-	var featureID *int64
-	if featureSlug != "" {
-		f, err := s.GetFeatureBySlug(repo.ID, featureSlug)
-		if err != nil {
-			return fmt.Errorf("feature %q: %w", featureSlug, err)
-		}
-		featureID = &f.ID
+	iss, err := c.CreateIssue(context.Background(), repo, in, opts.dryRun)
+	if err != nil {
+		return err
 	}
 	if opts.dryRun {
-		projected := &model.Issue{
-			RepoID:      repo.ID,
-			Number:      repo.NextIssueNumber,
-			Key:         fmt.Sprintf("%s-%d", repo.Prefix, repo.NextIssueNumber),
-			FeatureID:   featureID,
-			FeatureSlug: featureSlug,
-			Title:       title,
-			Description: description,
-			State:       state,
-			Tags:        tags,
-		}
-		if projected.Tags == nil {
-			projected.Tags = []string{}
-		}
-		return emitDryRun(projected)
+		return emitDryRun(iss)
 	}
-	iss, err := s.CreateIssue(repo.ID, featureID, title, description, state, tags)
-	if err != nil {
-		return err
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
-		Op: "issue.create", Kind: "issue",
-		TargetID: &iss.ID, TargetLabel: iss.Key,
-		Details: iss.Title,
-	})
 	return emit(iss)
 }
 
@@ -206,26 +126,18 @@ func issueListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List issues (descriptions are stripped by default; pass --with-description to include them)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStore()
+			c, err := openClient()
 			if err != nil {
 				return err
 			}
-			defer s.Close()
-
-			f := store.IssueFilter{AllRepos: allRepos, IncludeDescription: withDescription}
+			defer c.Close()
+			f := client.IssueFilter{AllRepos: allRepos, IncludeDescription: withDescription, FeatureSlug: featureSlug}
 			if !allRepos {
-				repo, err := resolveRepo(s)
+				repo, err := resolveRepoC(c)
 				if err != nil {
 					return err
 				}
-				f.RepoID = &repo.ID
-				if featureSlug != "" {
-					feat, err := s.GetFeatureBySlug(repo.ID, featureSlug)
-					if err != nil {
-						return fmt.Errorf("feature %q: %w", featureSlug, err)
-					}
-					f.FeatureID = &feat.ID
-				}
+				f.Repo = repo
 			}
 			if stateCSV != "" {
 				for _, raw := range strings.Split(stateCSV, ",") {
@@ -243,7 +155,7 @@ func issueListCmd() *cobra.Command {
 				}
 				f.Tags = cleanTags
 			}
-			issues, err := s.ListIssues(f)
+			issues, err := c.ListIssues(context.Background(), f)
 			if err != nil {
 				return err
 			}
@@ -264,37 +176,39 @@ func issueShowCmd() *cobra.Command {
 		Short: "Show an issue with comments and relations",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStore()
+			c, err := openClient()
 			if err != nil {
 				return err
 			}
-			defer s.Close()
-			iss, err := resolveIssueByKey(s, args[0])
+			defer c.Close()
+			repo, err := repoForIssueKey(c, args[0])
 			if err != nil {
 				return err
 			}
-			comments, err := s.ListComments(iss.ID)
-			if err != nil {
-				return err
-			}
-			rels, err := s.ListIssueRelations(iss.ID)
-			if err != nil {
-				return err
-			}
-			prs, err := s.ListPRs(iss.ID)
-			if err != nil {
-				return err
-			}
-			docs, err := s.ListDocumentsLinkedToIssue(iss.ID)
+			view, err := c.ShowIssue(context.Background(), repo, args[0])
 			if err != nil {
 				return err
 			}
 			return emit(&issueView{
-				Issue: iss, Comments: comments, Relations: rels,
-				PullRequests: prs, Documents: docs,
+				Issue: view.Issue, Comments: view.Comments, Relations: view.Relations,
+				PullRequests: view.PullRequests, Documents: view.Documents,
 			})
 		},
 	}
+}
+
+// repoForIssueKey returns the repo for a key. For canonical PREFIX-N,
+// resolves by prefix; for bare numbers, uses CWD's repo.
+func repoForIssueKey(c client.Client, key string) (*model.Repo, error) {
+	key = strings.TrimSpace(key)
+	if strings.Contains(key, "-") {
+		prefix, _, err := store.ParseIssueKey(key)
+		if err != nil {
+			return nil, err
+		}
+		return c.GetRepoByPrefix(context.Background(), prefix)
+	}
+	return resolveRepoC(c)
 }
 
 func issueEditCmd() *cobra.Command {
@@ -335,136 +249,106 @@ func issueEditCmd() *cobra.Command {
 }
 
 func runIssueEdit(cmd *cobra.Command, key, title, description, descriptionFile, featureSlug string, clearFeature bool) error {
-	s, err := openStore()
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	iss, err := resolveIssueByKey(s, key)
+	defer c.Close()
+	repo, err := repoForIssueKey(c, key)
 	if err != nil {
 		return err
 	}
-	var tPtr, dPtr *string
-	var fPtr **int64
+	edit := client.IssueEdit{}
 	if cmd.Flags().Changed("title") {
-		tPtr = &title
+		edit.Title = &title
 	}
 	if description != "" || descriptionFile != "" {
 		d, err := readLongText(description, descriptionFile, true, "description")
 		if err != nil {
 			return err
 		}
-		dPtr = &d
+		edit.Description = &d
 	}
 	if clearFeature && featureSlug != "" {
 		return fmt.Errorf("--feature and --no-feature are mutually exclusive")
 	}
 	if clearFeature {
 		var none *int64
-		fPtr = &none
+		edit.FeatureID = &none
 	} else if featureSlug != "" {
-		feat, err := s.GetFeatureBySlug(iss.RepoID, featureSlug)
+		feat, err := c.GetFeatureBySlug(context.Background(), repo, featureSlug)
 		if err != nil {
 			return fmt.Errorf("feature %q: %w", featureSlug, err)
 		}
 		p := &feat.ID
-		fPtr = &p
+		edit.FeatureID = &p
+		fs := featureSlug
+		edit.FeatureSlug = &fs
 	}
-	return applyIssueEdit(s, iss, tPtr, dPtr, fPtr)
+	return applyIssueEditC(c, repo, key, edit)
 }
 
 func runIssueEditJSON(raw []byte) error {
-	in, present, err := decodeStrict[inputs.IssueEditInput](raw)
+	in, present, err := inputio.DecodeStrict[inputs.IssueEditInput](raw)
 	if err != nil {
 		return err
 	}
 	if in.Key == "" {
 		return fmt.Errorf("key is required")
 	}
-	s, err := openStore()
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	iss, err := resolveIssueKeyStrict(s, in.Key)
+	defer c.Close()
+	repo, err := repoForIssueKey(c, in.Key)
 	if err != nil {
 		return err
 	}
-	var tPtr, dPtr *string
-	var fPtr **int64
+	edit := client.IssueEdit{}
 	if _, ok := present["title"]; ok {
 		if in.Title == nil || *in.Title == "" {
 			return fmt.Errorf("title cannot be empty or null; omit the field to leave it unchanged")
 		}
-		tPtr = in.Title
+		edit.Title = in.Title
 	}
 	if _, ok := present["description"]; ok {
 		if in.Description == nil {
 			empty := ""
-			dPtr = &empty
+			edit.Description = &empty
 		} else {
-			dPtr = in.Description
+			edit.Description = in.Description
 		}
 	}
 	if _, ok := present["feature_slug"]; ok {
 		if in.FeatureSlug == nil || *in.FeatureSlug == "" {
 			var none *int64
-			fPtr = &none
+			edit.FeatureID = &none
 		} else {
-			feat, err := s.GetFeatureBySlug(iss.RepoID, *in.FeatureSlug)
+			feat, err := c.GetFeatureBySlug(context.Background(), repo, *in.FeatureSlug)
 			if err != nil {
 				return fmt.Errorf("feature %q: %w", *in.FeatureSlug, err)
 			}
 			p := &feat.ID
-			fPtr = &p
+			edit.FeatureID = &p
+			fs := *in.FeatureSlug
+			edit.FeatureSlug = &fs
 		}
 	}
-	return applyIssueEdit(s, iss, tPtr, dPtr, fPtr)
+	return applyIssueEditC(c, repo, in.Key, edit)
 }
 
-func applyIssueEdit(s *store.Store, iss *model.Issue, tPtr, dPtr *string, fPtr **int64) error {
-	if tPtr == nil && dPtr == nil && fPtr == nil {
+func applyIssueEditC(c client.Client, repo *model.Repo, key string, edit client.IssueEdit) error {
+	if edit.Title == nil && edit.Description == nil && edit.FeatureID == nil {
 		return fmt.Errorf("nothing to update")
 	}
-	if opts.dryRun {
-		projected := *iss
-		if tPtr != nil {
-			projected.Title = *tPtr
-		}
-		if dPtr != nil {
-			projected.Description = *dPtr
-		}
-		if fPtr != nil {
-			projected.FeatureID = *fPtr
-			if *fPtr == nil {
-				projected.FeatureSlug = ""
-			} else {
-				feat, err := s.GetFeatureByID(**fPtr)
-				if err != nil {
-					return err
-				}
-				projected.FeatureSlug = feat.Slug
-			}
-		}
-		return emitDryRun(&projected)
-	}
-	if err := s.UpdateIssue(iss.ID, tPtr, dPtr, fPtr); err != nil {
-		return err
-	}
-	updated, err := s.GetIssueByID(iss.ID)
+	updated, err := c.UpdateIssue(context.Background(), repo, key, edit, opts.dryRun)
 	if err != nil {
 		return err
 	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &iss.RepoID,
-		Op:     "issue.update", Kind: "issue",
-		TargetID: &updated.ID, TargetLabel: updated.Key,
-		Details: updatedFieldList(map[string]bool{
-			"title":       tPtr != nil,
-			"description": dPtr != nil,
-			"feature":     fPtr != nil,
-		}),
-	})
+	if opts.dryRun {
+		return emitDryRun(updated)
+	}
 	return emit(updated)
 }
 
@@ -483,7 +367,7 @@ func issueStateCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.IssueStateInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.IssueStateInput](raw)
 				if err != nil {
 					return err
 				}
@@ -507,38 +391,28 @@ func setIssueState(key, stateStr string, strict bool) error {
 	if err != nil {
 		return err
 	}
-	s, err := openStore()
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	resolve := resolveIssueByKey
+	defer c.Close()
 	if strict {
-		resolve = resolveIssueKeyStrict
+		key = strings.TrimSpace(key)
+		if !strings.Contains(key, "-") {
+			return fmt.Errorf("issue key %q must be canonical (e.g. \"MINI-42\")", key)
+		}
 	}
-	iss, err := resolve(s, key)
+	repo, err := repoForIssueKey(c, key)
+	if err != nil {
+		return err
+	}
+	updated, err := c.SetIssueState(context.Background(), repo, key, st, opts.dryRun)
 	if err != nil {
 		return err
 	}
 	if opts.dryRun {
-		projected := *iss
-		projected.State = st
-		return emitDryRun(&projected)
+		return emitDryRun(updated)
 	}
-	oldState := iss.State
-	if err := s.SetIssueState(iss.ID, st); err != nil {
-		return err
-	}
-	updated, err := s.GetIssueByID(iss.ID)
-	if err != nil {
-		return err
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &iss.RepoID,
-		Op:     "issue.state", Kind: "issue",
-		TargetID: &updated.ID, TargetLabel: updated.Key,
-		Details: fmt.Sprintf("%s → %s", oldState, st),
-	})
 	return emit(updated)
 }
 
@@ -594,65 +468,42 @@ shape of an issue's context without paying for every linked doc's full
 text. Fetch specific bodies later via mk doc show.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStore()
+			c, err := openClient()
 			if err != nil {
 				return err
 			}
-			defer s.Close()
-			iss, err := resolveIssueByKey(s, args[0])
+			defer c.Close()
+			repo, err := repoForIssueKey(c, args[0])
 			if err != nil {
 				return err
 			}
-
-			var feat *model.Feature
-			if iss.FeatureID != nil {
-				feat, err = s.GetFeatureByID(*iss.FeatureID)
-				if err != nil {
-					return err
-				}
-			}
-
-			rels, err := s.ListIssueRelations(iss.ID)
+			view, err := c.BriefIssue(context.Background(), repo, args[0], client.BriefOptions{
+				NoFeatureDocs: noFeatureDocs,
+				NoComments:    noComments,
+				NoDocContent:  noDocContent,
+			})
 			if err != nil {
 				return err
 			}
-			prs, err := s.ListPRs(iss.ID)
-			if err != nil {
-				return err
+			docs := make([]*briefDoc, 0, len(view.Documents))
+			for _, d := range view.Documents {
+				docs = append(docs, &briefDoc{
+					Filename:    d.Filename,
+					Type:        d.Type,
+					Description: d.Description,
+					SourcePath:  d.SourcePath,
+					LinkedVia:   d.LinkedVia,
+					Content:     d.Content,
+				})
 			}
-			if prs == nil {
-				prs = []*model.PullRequest{}
-			}
-
-			docs, warnings, err := collectBriefDocs(s, iss.ID, feat, !noFeatureDocs)
-			if err != nil {
-				return err
-			}
-			if noDocContent {
-				for _, d := range docs {
-					d.Content = ""
-				}
-			}
-
-			var comments []*model.Comment
-			if !noComments {
-				comments, err = s.ListComments(iss.ID)
-				if err != nil {
-					return err
-				}
-			}
-			if comments == nil {
-				comments = []*model.Comment{}
-			}
-
 			brief := &issueBrief{
-				Issue:        iss,
-				Feature:      feat,
-				Relations:    rels,
-				PullRequests: prs,
+				Issue:        view.Issue,
+				Feature:      view.Feature,
+				Relations:    view.Relations,
+				PullRequests: view.PullRequests,
 				Documents:    docs,
-				Comments:     comments,
-				Warnings:     warnings,
+				Comments:     view.Comments,
+				Warnings:     view.Warnings,
 			}
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
@@ -663,77 +514,6 @@ text. Fetch specific bodies later via mk doc show.`,
 	cmd.Flags().BoolVar(&noComments, "no-comments", false, "skip the comments section")
 	cmd.Flags().BoolVar(&noDocContent, "no-doc-content", false, "keep linked-doc metadata but drop their bodies (fetch via `mk doc show`)")
 	return cmd
-}
-
-// collectBriefDocs assembles the deduped document list for an issue brief.
-// Issue links come first; feature links append to existing entries (extending
-// linked_via) or create new ones. When both link rows have differing --why
-// descriptions, the issue's wins and a warning is appended so nothing is
-// silently dropped.
-func collectBriefDocs(s *store.Store, issueID int64, feat *model.Feature, includeFeature bool) ([]*briefDoc, []string, error) {
-	warnings := []string{}
-	out := []*briefDoc{}
-	byDocID := map[int64]*briefDoc{}
-
-	issueLinks, err := s.ListDocumentsLinkedToIssue(issueID)
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, l := range issueLinks {
-		d, err := s.GetDocumentByID(l.DocumentID, true)
-		if err != nil {
-			return nil, nil, err
-		}
-		entry := &briefDoc{
-			Filename:    d.Filename,
-			Type:        d.Type,
-			Description: l.Description,
-			SourcePath:  d.SourcePath,
-			LinkedVia:   []string{"issue"},
-			Content:     d.Content,
-		}
-		out = append(out, entry)
-		byDocID[d.ID] = entry
-	}
-
-	if includeFeature && feat != nil {
-		featLinks, err := s.ListDocumentsLinkedToFeature(feat.ID)
-		if err != nil {
-			return nil, nil, err
-		}
-		via := "feature/" + feat.Slug
-		for _, l := range featLinks {
-			if existing, ok := byDocID[l.DocumentID]; ok {
-				existing.LinkedVia = append(existing.LinkedVia, via)
-				if l.Description != "" && l.Description != existing.Description {
-					if existing.Description == "" {
-						existing.Description = l.Description
-					} else {
-						warnings = append(warnings, fmt.Sprintf(
-							"document %s: feature link description differs from issue link; using issue's. Feature said: %q",
-							existing.Filename, l.Description))
-					}
-				}
-				continue
-			}
-			d, err := s.GetDocumentByID(l.DocumentID, true)
-			if err != nil {
-				return nil, nil, err
-			}
-			entry := &briefDoc{
-				Filename:    d.Filename,
-				Type:        d.Type,
-				Description: l.Description,
-				SourcePath:  d.SourcePath,
-				LinkedVia:   []string{via},
-				Content:     d.Content,
-			}
-			out = append(out, entry)
-			byDocID[d.ID] = entry
-		}
-	}
-
-	return out, warnings, nil
 }
 
 func issueAssignCmd() *cobra.Command {
@@ -751,7 +531,7 @@ func issueAssignCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.IssueAssignInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.IssueAssignInput](raw)
 				if err != nil {
 					return err
 				}
@@ -775,42 +555,28 @@ func assignIssue(key, name string, strict bool) error {
 	if name == "" {
 		return fmt.Errorf("assignee name must be non-empty (use `mk issue unassign` to clear)")
 	}
-	s, err := openStore()
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	resolve := resolveIssueByKey
+	defer c.Close()
 	if strict {
-		resolve = resolveIssueKeyStrict
+		key = strings.TrimSpace(key)
+		if !strings.Contains(key, "-") {
+			return fmt.Errorf("issue key %q must be canonical (e.g. \"MINI-42\")", key)
+		}
 	}
-	iss, err := resolve(s, key)
+	repo, err := repoForIssueKey(c, key)
+	if err != nil {
+		return err
+	}
+	updated, err := c.AssignIssue(context.Background(), repo, key, name, opts.dryRun)
 	if err != nil {
 		return err
 	}
 	if opts.dryRun {
-		projected := *iss
-		projected.Assignee = name
-		return emitDryRun(&projected)
+		return emitDryRun(updated)
 	}
-	old := iss.Assignee
-	if err := s.SetIssueAssignee(iss.ID, name); err != nil {
-		return err
-	}
-	updated, err := s.GetIssueByID(iss.ID)
-	if err != nil {
-		return err
-	}
-	details := "assigned to " + name
-	if old != "" {
-		details = fmt.Sprintf("%s → %s", old, name)
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &iss.RepoID,
-		Op:     "issue.assign", Kind: "issue",
-		TargetID: &updated.ID, TargetLabel: updated.Key,
-		Details: details,
-	})
 	return emit(updated)
 }
 
@@ -829,7 +595,7 @@ func issueUnassignCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.IssueUnassignInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.IssueUnassignInput](raw)
 				if err != nil {
 					return err
 				}
@@ -849,41 +615,28 @@ func issueUnassignCmd() *cobra.Command {
 }
 
 func unassignIssue(key string, strict bool) error {
-	s, err := openStore()
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	resolve := resolveIssueByKey
+	defer c.Close()
 	if strict {
-		resolve = resolveIssueKeyStrict
+		key = strings.TrimSpace(key)
+		if !strings.Contains(key, "-") {
+			return fmt.Errorf("issue key %q must be canonical (e.g. \"MINI-42\")", key)
+		}
 	}
-	iss, err := resolve(s, key)
+	repo, err := repoForIssueKey(c, key)
 	if err != nil {
 		return err
 	}
-	if iss.Assignee == "" {
-		return emit(iss)
+	updated, err := c.UnassignIssue(context.Background(), repo, key, opts.dryRun)
+	if err != nil {
+		return err
 	}
 	if opts.dryRun {
-		projected := *iss
-		projected.Assignee = ""
-		return emitDryRun(&projected)
+		return emitDryRun(updated)
 	}
-	old := iss.Assignee
-	if err := s.SetIssueAssignee(iss.ID, ""); err != nil {
-		return err
-	}
-	updated, err := s.GetIssueByID(iss.ID)
-	if err != nil {
-		return err
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &iss.RepoID,
-		Op:     "issue.assign", Kind: "issue",
-		TargetID: &updated.ID, TargetLabel: updated.Key,
-		Details: fmt.Sprintf("%s → (unassigned)", old),
-	})
 	return emit(updated)
 }
 
@@ -921,7 +674,7 @@ identity instead of the OS username.`,
 				if err := rejectMixedInput(cmd, args, "feature"); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.IssueNextInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.IssueNextInput](raw)
 				if err != nil {
 					return err
 				}
@@ -942,40 +695,21 @@ identity instead of the OS username.`,
 }
 
 func claimNextIssue(featureSlug string) error {
-	s, err := openStore()
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	repo, err := resolveRepo(s)
+	defer c.Close()
+	repo, err := resolveRepoC(c)
 	if err != nil {
 		return err
 	}
-	feat, err := s.GetFeatureBySlug(repo.ID, featureSlug)
+	iss, err := c.ClaimNextIssue(context.Background(), repo, featureSlug, opts.dryRun)
 	if err != nil {
-		return fmt.Errorf("feature %q: %w", featureSlug, err)
+		return err
 	}
 	if opts.dryRun {
-		// Equivalent to `mk issue peek`: report what would be claimed
-		// without flipping state or stamping the assignee.
-		iss, err := s.PeekNextIssue(repo.ID, feat.ID)
-		if err != nil {
-			return err
-		}
 		return emitDryRun(&claimResult{Issue: iss})
-	}
-	who := actor()
-	iss, err := s.ClaimNextIssue(repo.ID, feat.ID, who)
-	if err != nil {
-		return err
-	}
-	if iss != nil {
-		recordOp(s, model.HistoryEntry{
-			RepoID: &repo.ID, RepoPrefix: repo.Prefix,
-			Op: "issue.claim", Kind: "issue",
-			TargetID: &iss.ID, TargetLabel: iss.Key,
-			Details: fmt.Sprintf("claimed by %s (todo → in_progress)", who),
-		})
 	}
 	return emit(&claimResult{Issue: iss})
 }
@@ -996,20 +730,16 @@ claimable, matching the shape of ` + "`mk issue next`" + `.`,
 			if featureSlug == "" {
 				return fmt.Errorf("--feature is required")
 			}
-			s, err := openStore()
+			c, err := openClient()
 			if err != nil {
 				return err
 			}
-			defer s.Close()
-			repo, err := resolveRepo(s)
+			defer c.Close()
+			repo, err := resolveRepoC(c)
 			if err != nil {
 				return err
 			}
-			feat, err := s.GetFeatureBySlug(repo.ID, featureSlug)
-			if err != nil {
-				return fmt.Errorf("feature %q: %w", featureSlug, err)
-			}
-			iss, err := s.PeekNextIssue(repo.ID, feat.ID)
+			iss, err := c.PeekNextIssue(context.Background(), repo, featureSlug)
 			if err != nil {
 				return err
 			}
@@ -1035,7 +765,7 @@ func issueRmCmd() *cobra.Command {
 				if err := rejectMixedInput(cmd, args); err != nil {
 					return err
 				}
-				in, _, err := decodeStrict[inputs.IssueRmInput](raw)
+				in, _, err := inputio.DecodeStrict[inputs.IssueRmInput](raw)
 				if err != nil {
 					return err
 				}
@@ -1055,45 +785,48 @@ func issueRmCmd() *cobra.Command {
 }
 
 func removeIssue(key string, strict bool) error {
-	s, err := openStore()
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	resolve := resolveIssueByKey
+	defer c.Close()
 	if strict {
-		resolve = resolveIssueKeyStrict
+		key = strings.TrimSpace(key)
+		if !strings.Contains(key, "-") {
+			return fmt.Errorf("issue key %q must be canonical (e.g. \"MINI-42\")", key)
+		}
 	}
-	iss, err := resolve(s, key)
+	repo, err := repoForIssueKey(c, key)
+	if err != nil {
+		return err
+	}
+	deleted, preview, err := c.DeleteIssue(context.Background(), repo, key, opts.dryRun)
 	if err != nil {
 		return err
 	}
 	if opts.dryRun {
-		preview, err := previewIssueDelete(s, iss)
-		if err != nil {
-			return err
-		}
-		return emitDryRun(preview)
+		return emitDryRun(&issueDeletePreview{
+			Issue: preview.Issue,
+			Cascade: cascadeCount{
+				Comments:      preview.Cascade.Comments,
+				Relations:     preview.Cascade.Relations,
+				PullRequests:  preview.Cascade.PullRequests,
+				DocumentLinks: preview.Cascade.DocumentLinks,
+				Tags:          preview.Cascade.Tags,
+			},
+			WouldDelete: preview.WouldDelete,
+		})
 	}
-	if err := s.DeleteIssue(iss.ID); err != nil {
-		return err
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &iss.RepoID,
-		Op:     "issue.delete", Kind: "issue",
-		TargetID: &iss.ID, TargetLabel: iss.Key,
-		Details: iss.Title,
-	})
-	return ok("issue %s deleted", iss.Key)
+	return ok("issue %s deleted", deleted.Key)
 }
 
 // issueDeletePreview is the dry-run payload for `mk issue rm`. It records
 // the row that would be deleted plus how many dependent rows would be
 // cascade-removed alongside it.
 type issueDeletePreview struct {
-	Issue          *model.Issue `json:"issue"`
-	Cascade        cascadeCount `json:"cascade"`
-	WouldDelete    bool         `json:"would_delete"`
+	Issue       *model.Issue `json:"issue"`
+	Cascade     cascadeCount `json:"cascade"`
+	WouldDelete bool         `json:"would_delete"`
 }
 
 // cascadeCount summarises how many dependent rows ride along with a
@@ -1105,38 +838,4 @@ type cascadeCount struct {
 	PullRequests  int `json:"pull_requests"`
 	DocumentLinks int `json:"document_links"`
 	Tags          int `json:"tags"`
-}
-
-func previewIssueDelete(s *store.Store, iss *model.Issue) (*issueDeletePreview, error) {
-	comments, err := s.ListComments(iss.ID)
-	if err != nil {
-		return nil, err
-	}
-	relations, err := s.ListIssueRelations(iss.ID)
-	if err != nil {
-		return nil, err
-	}
-	prs, err := s.ListPRs(iss.ID)
-	if err != nil {
-		return nil, err
-	}
-	docs, err := s.ListDocumentsLinkedToIssue(iss.ID)
-	if err != nil {
-		return nil, err
-	}
-	relCount := 0
-	if relations != nil {
-		relCount = len(relations.Outgoing) + len(relations.Incoming)
-	}
-	return &issueDeletePreview{
-		Issue:       iss,
-		WouldDelete: true,
-		Cascade: cascadeCount{
-			Comments:      len(comments),
-			Relations:     relCount,
-			PullRequests:  len(prs),
-			DocumentLinks: len(docs),
-			Tags:          len(iss.Tags),
-		},
-	}, nil
 }

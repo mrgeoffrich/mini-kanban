@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -43,28 +41,6 @@ func readJSONInput(value string) ([]byte, error) {
 		return b, nil
 	}
 	return []byte(value), nil
-}
-
-// decodeStrict parses raw JSON into *T using DisallowUnknownFields. It also
-// returns a presence map of the top-level keys actually written by the
-// caller, so edit-style commands can distinguish "field omitted" from
-// "field set to empty/null".
-func decodeStrict[T any](raw []byte) (*T, map[string]json.RawMessage, error) {
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 {
-		return nil, nil, fmt.Errorf("empty JSON payload")
-	}
-	var keys map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &keys); err != nil {
-		return nil, nil, fmt.Errorf("parse JSON: %w", err)
-	}
-	var v T
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&v); err != nil {
-		return nil, nil, fmt.Errorf("decode JSON: %w", err)
-	}
-	return &v, keys, nil
 }
 
 // addInputFlag registers --json/-j on cmd, storing the raw value in *target.

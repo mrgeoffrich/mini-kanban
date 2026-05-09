@@ -18,6 +18,9 @@ func newInitCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Bind the current git repo to a kanban prefix",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if inRemoteMode() {
+				return fmt.Errorf("mk init: not supported in remote mode (this verb auto-detects CWD git state); use POST /repos against the API or run `mk init` against the local DB instead")
+			}
 			cwd, err := os.Getwd()
 			if err != nil {
 				return err
