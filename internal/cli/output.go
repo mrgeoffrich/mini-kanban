@@ -109,6 +109,8 @@ func renderText(w io.Writer, v any) error {
 		for _, e := range x {
 			printHistoryLine(w, e)
 		}
+	case exportResult:
+		printExportResult(w, x)
 	case message:
 		fmt.Fprintln(w, x.Text)
 	default:
@@ -338,4 +340,22 @@ type message struct {
 
 func ok(format string, a ...any) error {
 	return emit(message{Text: fmt.Sprintf(format, a...)})
+}
+
+// printExportResult renders a sync.ExportResult as a one-line-per-kind
+// summary. Used by `mk sync export` (and, eventually, the steady-state
+// `mk sync`). Kept separate from the JSON output so callers parsing
+// the structured form aren't subject to text-format churn.
+func printExportResult(w io.Writer, r exportResult) {
+	if r.ExportResult == nil {
+		return
+	}
+	fmt.Fprintf(w, "Exported to %s\n", r.Target)
+	fmt.Fprintf(w, "  repos:     %d\n", r.Repos)
+	fmt.Fprintf(w, "  features:  %d\n", r.Features)
+	fmt.Fprintf(w, "  issues:    %d\n", r.Issues)
+	fmt.Fprintf(w, "  comments:  %d\n", r.Comments)
+	fmt.Fprintf(w, "  documents: %d\n", r.Documents)
+	fmt.Fprintf(w, "  files:     %d\n", r.Files)
+	fmt.Fprintf(w, "  bytes:     %d\n", r.BytesWritten)
 }
