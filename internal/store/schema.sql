@@ -1,5 +1,6 @@
 CREATE TABLE IF NOT EXISTS repos (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid               TEXT    NOT NULL UNIQUE,
     prefix             TEXT    NOT NULL UNIQUE,
     name               TEXT    NOT NULL,
     path               TEXT    NOT NULL UNIQUE,
@@ -10,6 +11,7 @@ CREATE TABLE IF NOT EXISTS repos (
 
 CREATE TABLE IF NOT EXISTS features (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid        TEXT    NOT NULL UNIQUE,
     repo_id     INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
     slug        TEXT    NOT NULL,
     title       TEXT    NOT NULL,
@@ -21,6 +23,7 @@ CREATE TABLE IF NOT EXISTS features (
 
 CREATE TABLE IF NOT EXISTS issues (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid        TEXT    NOT NULL UNIQUE,
     repo_id     INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
     number      INTEGER NOT NULL,
     feature_id  INTEGER REFERENCES features(id) ON DELETE SET NULL,
@@ -42,6 +45,7 @@ CREATE INDEX IF NOT EXISTS idx_issues_feature ON issues(feature_id);
 
 CREATE TABLE IF NOT EXISTS comments (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid       TEXT    NOT NULL UNIQUE,
     issue_id   INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
     author     TEXT    NOT NULL,
     body       TEXT    NOT NULL,
@@ -84,6 +88,7 @@ CREATE INDEX IF NOT EXISTS idx_issue_tags_tag ON issue_tags(tag);
 
 CREATE TABLE IF NOT EXISTS documents (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid        TEXT    NOT NULL UNIQUE,
     repo_id     INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
     filename    TEXT    NOT NULL,
     type        TEXT    NOT NULL CHECK (type IN
@@ -152,3 +157,17 @@ CREATE TABLE IF NOT EXISTS tui_settings (
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (repo_id, key)
 );
+
+-- sync_state tracks records that have participated in a git-backed sync
+-- pass. Presence-of-row means "previously synced"; absence means
+-- "local-only, never exported". CRUD lands in a later phase; the table
+-- exists now so migrate() can add it idempotently to older DBs.
+CREATE TABLE IF NOT EXISTS sync_state (
+    uuid             TEXT    NOT NULL PRIMARY KEY,
+    kind             TEXT    NOT NULL CHECK (kind IN
+                       ('issue','feature','document','comment','repo')),
+    last_synced_at   DATETIME NOT NULL,
+    last_synced_hash TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_state_kind ON sync_state(kind);
