@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS repos (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    uuid               TEXT    NOT NULL UNIQUE,
+    uuid               TEXT    NOT NULL,
     prefix             TEXT    NOT NULL UNIQUE,
     name               TEXT    NOT NULL,
     path               TEXT    NOT NULL UNIQUE,
@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS repos (
 
 CREATE TABLE IF NOT EXISTS features (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    uuid        TEXT    NOT NULL UNIQUE,
+    uuid        TEXT    NOT NULL,
     repo_id     INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
     slug        TEXT    NOT NULL,
     title       TEXT    NOT NULL,
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS features (
 
 CREATE TABLE IF NOT EXISTS issues (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    uuid        TEXT    NOT NULL UNIQUE,
+    uuid        TEXT    NOT NULL,
     repo_id     INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
     number      INTEGER NOT NULL,
     feature_id  INTEGER REFERENCES features(id) ON DELETE SET NULL,
@@ -45,7 +45,7 @@ CREATE INDEX IF NOT EXISTS idx_issues_feature ON issues(feature_id);
 
 CREATE TABLE IF NOT EXISTS comments (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    uuid       TEXT    NOT NULL UNIQUE,
+    uuid       TEXT    NOT NULL,
     issue_id   INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
     author     TEXT    NOT NULL,
     body       TEXT    NOT NULL,
@@ -88,7 +88,7 @@ CREATE INDEX IF NOT EXISTS idx_issue_tags_tag ON issue_tags(tag);
 
 CREATE TABLE IF NOT EXISTS documents (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    uuid        TEXT    NOT NULL UNIQUE,
+    uuid        TEXT    NOT NULL,
     repo_id     INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
     filename    TEXT    NOT NULL,
     type        TEXT    NOT NULL CHECK (type IN
