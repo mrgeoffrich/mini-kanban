@@ -94,7 +94,7 @@ func auth(next http.Handler, token string) http.Handler {
 	})
 }
 
-func actorMiddleware(next http.Handler, _ *store.Store) http.Handler {
+func actorMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw := r.Header.Get("X-Actor")
 		actor := defaultActor

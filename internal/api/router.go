@@ -33,7 +33,7 @@ func newRouter(d deps) http.Handler {
 	var h http.Handler = mux
 	h = bodyCap(h, 4<<20)
 	h = auth(h, d.opts.Token)
-	h = actorMiddleware(h, d.store)
+	h = actorMiddleware(h)
 	h = requestLog(h, d.logger)
 	h = recoverPanic(h, d.logger)
 	return h
