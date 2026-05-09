@@ -172,46 +172,6 @@ func (e *notFoundError) Unwrap() error { return store.ErrNotFound }
 // Stub implementations follow. Real bodies arrive verb-by-verb in
 // later commits.
 
-func (c *remoteClient) ResolveIssueKey(ctx context.Context, repo *model.Repo, key string) (string, error) {
-	return "", errors.New("not implemented")
-}
-func (c *remoteClient) ListIssues(ctx context.Context, f IssueFilter) ([]*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) GetIssueByKey(ctx context.Context, repo *model.Repo, key string) (*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) ShowIssue(ctx context.Context, repo *model.Repo, key string) (*IssueView, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) BriefIssue(ctx context.Context, repo *model.Repo, key string, opts BriefOptions) (*IssueBrief, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) CreateIssue(ctx context.Context, repo *model.Repo, in inputs.IssueAddInput, dryRun bool) (*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) UpdateIssue(ctx context.Context, repo *model.Repo, key string, edit IssueEdit, dryRun bool) (*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) SetIssueState(ctx context.Context, repo *model.Repo, key string, state model.State, dryRun bool) (*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) AssignIssue(ctx context.Context, repo *model.Repo, key, assignee string, dryRun bool) (*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) UnassignIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) DeleteIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, *IssueDeletePreview, error) {
-	return nil, nil, errors.New("not implemented")
-}
-func (c *remoteClient) PeekNextIssue(ctx context.Context, repo *model.Repo, slug string) (*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) ClaimNextIssue(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-
 func (c *remoteClient) ListComments(ctx context.Context, repo *model.Repo, key string) ([]*model.Comment, error) {
 	return nil, errors.New("not implemented")
 }

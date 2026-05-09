@@ -117,46 +117,6 @@ func (c *localClient) EnsureRepo(ctx context.Context, info *git.Info) (*model.Re
 // Stub method bodies live in this file initially. Real implementations
 // arrive verb-by-verb in subsequent commits.
 
-func (c *localClient) ResolveIssueKey(ctx context.Context, repo *model.Repo, key string) (string, error) {
-	return "", errors.New("not implemented")
-}
-func (c *localClient) ListIssues(ctx context.Context, f IssueFilter) ([]*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) GetIssueByKey(ctx context.Context, repo *model.Repo, key string) (*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) ShowIssue(ctx context.Context, repo *model.Repo, key string) (*IssueView, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) BriefIssue(ctx context.Context, repo *model.Repo, key string, opts BriefOptions) (*IssueBrief, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) CreateIssue(ctx context.Context, repo *model.Repo, in inputs.IssueAddInput, dryRun bool) (*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) UpdateIssue(ctx context.Context, repo *model.Repo, key string, edit IssueEdit, dryRun bool) (*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) SetIssueState(ctx context.Context, repo *model.Repo, key string, state model.State, dryRun bool) (*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) AssignIssue(ctx context.Context, repo *model.Repo, key, assignee string, dryRun bool) (*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) UnassignIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) DeleteIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, *IssueDeletePreview, error) {
-	return nil, nil, errors.New("not implemented")
-}
-func (c *localClient) PeekNextIssue(ctx context.Context, repo *model.Repo, slug string) (*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) ClaimNextIssue(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-
 func (c *localClient) ListComments(ctx context.Context, repo *model.Repo, key string) ([]*model.Comment, error) {
 	return nil, errors.New("not implemented")
 }

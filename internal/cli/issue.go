@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
+	"github.com/mrgeoffrich/mini-kanban/internal/client"
 	"github.com/mrgeoffrich/mini-kanban/internal/inputio"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
@@ -32,7 +34,26 @@ func newIssueCmd() *cobra.Command {
 	return cmd
 }
 
-// resolveIssueByKey resolves "MINI-42" or just "42" (relative to current repo).
+// resolveIssueByKeyC resolves "MINI-42" or just "42" via the client. The
+// repo argument supplies the implicit current repo for bare-number
+// references; pass nil only when you know the input is canonical.
+func resolveIssueByKeyC(c client.Client, repo *model.Repo, key string) (*model.Issue, error) {
+	return c.GetIssueByKey(context.Background(), repo, key)
+}
+
+// resolveIssueKeyStrictC requires canonical PREFIX-N. Used by the JSON
+// path where bare numbers shouldn't sneak in.
+func resolveIssueKeyStrictC(c client.Client, key string) (*model.Issue, error) {
+	key = strings.TrimSpace(key)
+	if !strings.Contains(key, "-") {
+		return nil, fmt.Errorf("issue key %q must be canonical (e.g. \"MINI-42\")", key)
+	}
+	return c.GetIssueByKey(context.Background(), nil, key)
+}
+
+// resolveIssueByKey is the store-level shim retained while the rest of
+// the issue-touching commands are still on *store.Store. Removed once
+// every caller has migrated to resolveIssueByKeyC.
 func resolveIssueByKey(s *store.Store, key string) (*model.Issue, error) {
 	key = strings.TrimSpace(key)
 	if !strings.Contains(key, "-") {
@@ -53,9 +74,8 @@ func resolveIssueByKey(s *store.Store, key string) (*model.Issue, error) {
 	return s.GetIssueByKey(prefix, num)
 }
 
-// resolveIssueKeyStrict is the JSON-path equivalent of resolveIssueByKey: it
-// requires the canonical "PREFIX-N" form and refuses bare-number references.
-// Agents shouldn't be guessing the current repo's prefix.
+// resolveIssueKeyStrict is the store-level strict variant; same retention
+// strategy as resolveIssueByKey.
 func resolveIssueKeyStrict(s *store.Store, key string) (*model.Issue, error) {
 	key = strings.TrimSpace(key)
 	if !strings.Contains(key, "-") {
@@ -110,18 +130,13 @@ func runIssueAdd(title, featureSlug, description, descriptionFile, stateStr stri
 	if err != nil {
 		return err
 	}
-	state := model.StateBacklog
-	if stateStr != "" {
-		state, err = model.ParseState(stateStr)
-		if err != nil {
-			return err
-		}
-	}
-	cleanTags, err := store.NormalizeTags(tags)
-	if err != nil {
-		return err
-	}
-	return createIssue(title, featureSlug, desc, state, cleanTags)
+	return createIssue(inputs.IssueAddInput{
+		Title:       title,
+		FeatureSlug: featureSlug,
+		Description: desc,
+		State:       stateStr,
+		Tags:        tags,
+	})
 }
 
 func runIssueAddJSON(raw []byte) error {
@@ -129,69 +144,26 @@ func runIssueAddJSON(raw []byte) error {
 	if err != nil {
 		return err
 	}
-	if in.Title == "" {
-		return fmt.Errorf("title is required")
-	}
-	state := model.StateBacklog
-	if in.State != "" {
-		st, err := model.ParseState(in.State)
-		if err != nil {
-			return err
-		}
-		state = st
-	}
-	cleanTags, err := store.NormalizeTags(in.Tags)
-	if err != nil {
-		return err
-	}
-	return createIssue(in.Title, in.FeatureSlug, in.Description, state, cleanTags)
+	return createIssue(*in)
 }
 
-func createIssue(title, featureSlug, description string, state model.State, tags []string) error {
-	s, err := openStore()
+func createIssue(in inputs.IssueAddInput) error {
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	repo, err := resolveRepo(s)
+	defer c.Close()
+	repo, err := resolveRepoC(c)
 	if err != nil {
 		return err
 	}
-	var featureID *int64
-	if featureSlug != "" {
-		f, err := s.GetFeatureBySlug(repo.ID, featureSlug)
-		if err != nil {
-			return fmt.Errorf("feature %q: %w", featureSlug, err)
-		}
-		featureID = &f.ID
+	iss, err := c.CreateIssue(context.Background(), repo, in, opts.dryRun)
+	if err != nil {
+		return err
 	}
 	if opts.dryRun {
-		projected := &model.Issue{
-			RepoID:      repo.ID,
-			Number:      repo.NextIssueNumber,
-			Key:         fmt.Sprintf("%s-%d", repo.Prefix, repo.NextIssueNumber),
-			FeatureID:   featureID,
-			FeatureSlug: featureSlug,
-			Title:       title,
-			Description: description,
-			State:       state,
-			Tags:        tags,
-		}
-		if projected.Tags == nil {
-			projected.Tags = []string{}
-		}
-		return emitDryRun(projected)
+		return emitDryRun(iss)
 	}
-	iss, err := s.CreateIssue(repo.ID, featureID, title, description, state, tags)
-	if err != nil {
-		return err
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
-		Op: "issue.create", Kind: "issue",
-		TargetID: &iss.ID, TargetLabel: iss.Key,
-		Details: iss.Title,
-	})
 	return emit(iss)
 }
 
@@ -207,26 +179,18 @@ func issueListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List issues (descriptions are stripped by default; pass --with-description to include them)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStore()
+			c, err := openClient()
 			if err != nil {
 				return err
 			}
-			defer s.Close()
-
-			f := store.IssueFilter{AllRepos: allRepos, IncludeDescription: withDescription}
+			defer c.Close()
+			f := client.IssueFilter{AllRepos: allRepos, IncludeDescription: withDescription, FeatureSlug: featureSlug}
 			if !allRepos {
-				repo, err := resolveRepo(s)
+				repo, err := resolveRepoC(c)
 				if err != nil {
 					return err
 				}
-				f.RepoID = &repo.ID
-				if featureSlug != "" {
-					feat, err := s.GetFeatureBySlug(repo.ID, featureSlug)
-					if err != nil {
-						return fmt.Errorf("feature %q: %w", featureSlug, err)
-					}
-					f.FeatureID = &feat.ID
-				}
+				f.Repo = repo
 			}
 			if stateCSV != "" {
 				for _, raw := range strings.Split(stateCSV, ",") {
@@ -244,7 +208,7 @@ func issueListCmd() *cobra.Command {
 				}
 				f.Tags = cleanTags
 			}
-			issues, err := s.ListIssues(f)
+			issues, err := c.ListIssues(context.Background(), f)
 			if err != nil {
 				return err
 			}
@@ -265,37 +229,39 @@ func issueShowCmd() *cobra.Command {
 		Short: "Show an issue with comments and relations",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStore()
+			c, err := openClient()
 			if err != nil {
 				return err
 			}
-			defer s.Close()
-			iss, err := resolveIssueByKey(s, args[0])
+			defer c.Close()
+			repo, err := repoForIssueKey(c, args[0])
 			if err != nil {
 				return err
 			}
-			comments, err := s.ListComments(iss.ID)
-			if err != nil {
-				return err
-			}
-			rels, err := s.ListIssueRelations(iss.ID)
-			if err != nil {
-				return err
-			}
-			prs, err := s.ListPRs(iss.ID)
-			if err != nil {
-				return err
-			}
-			docs, err := s.ListDocumentsLinkedToIssue(iss.ID)
+			view, err := c.ShowIssue(context.Background(), repo, args[0])
 			if err != nil {
 				return err
 			}
 			return emit(&issueView{
-				Issue: iss, Comments: comments, Relations: rels,
-				PullRequests: prs, Documents: docs,
+				Issue: view.Issue, Comments: view.Comments, Relations: view.Relations,
+				PullRequests: view.PullRequests, Documents: view.Documents,
 			})
 		},
 	}
+}
+
+// repoForIssueKey returns the repo for a key. For canonical PREFIX-N,
+// resolves by prefix; for bare numbers, uses CWD's repo.
+func repoForIssueKey(c client.Client, key string) (*model.Repo, error) {
+	key = strings.TrimSpace(key)
+	if strings.Contains(key, "-") {
+		prefix, _, err := store.ParseIssueKey(key)
+		if err != nil {
+			return nil, err
+		}
+		return c.GetRepoByPrefix(context.Background(), prefix)
+	}
+	return resolveRepoC(c)
 }
 
 func issueEditCmd() *cobra.Command {
