@@ -64,6 +64,41 @@ func TestImport_RoundTripFromExport(t *testing.T) {
 	}
 }
 
+// TestImport_ReimportReportsNoop: importing the same export twice in
+// a row should report every record as `noop` on the second pass —
+// nothing differs, no UPDATE was warranted. Phase 5 added the
+// fields-actually-changed precheck inside applyIssues / applyDocuments
+// (applyFeatures had it from Phase 3) to make this hold.
+func TestImport_ReimportReportsNoop(t *testing.T) {
+	a, _ := seedExportFixture(t)
+	dirA := t.TempDir()
+	if _, err := (&Engine{Store: a}).Export(context.Background(), dirA); err != nil {
+		t.Fatalf("export A: %v", err)
+	}
+	b, _ := store.Open(":memory:")
+	t.Cleanup(func() { b.Close() })
+	first, err := (&Engine{Store: b}).Import(context.Background(), dirA)
+	if err != nil {
+		t.Fatalf("import 1: %v", err)
+	}
+	if first.Inserted == 0 {
+		t.Fatal("first import inserted nothing")
+	}
+	second, err := (&Engine{Store: b}).Import(context.Background(), dirA)
+	if err != nil {
+		t.Fatalf("import 2: %v", err)
+	}
+	if second.Inserted != 0 {
+		t.Errorf("second import unexpectedly inserted %d", second.Inserted)
+	}
+	if second.Updated != 0 {
+		t.Errorf("second import reported %d updates; expected 0 (everything is unchanged)", second.Updated)
+	}
+	if second.NoOp == 0 {
+		t.Errorf("second import reported 0 noops; expected the full record set")
+	}
+}
+
 // TestImport_CollisionRenumber: DB-B has a local-only issue at the
 // same number as one of DB-A's issues but with a different uuid.
 // Importing A into B should renumber B's issue and append a

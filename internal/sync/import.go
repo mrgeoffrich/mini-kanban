@@ -972,9 +972,19 @@ func (e *Engine) applyIssues(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, res 
 			}
 		}
 
-		var existingID int64
-		var existingNumber int64
-		err := tx.QueryRow(`SELECT id, number FROM issues WHERE uuid = ?`, uuid).Scan(&existingID, &existingNumber)
+		var (
+			existingID          int64
+			existingNumber      int64
+			existingFeatureID   sql.NullInt64
+			existingTitle       string
+			existingDescription string
+			existingState       string
+			existingAssignee    string
+		)
+		err := tx.QueryRow(
+			`SELECT id, number, feature_id, title, description, state, assignee FROM issues WHERE uuid = ?`,
+			uuid,
+		).Scan(&existingID, &existingNumber, &existingFeatureID, &existingTitle, &existingDescription, &existingState, &existingAssignee)
 		if errors.Is(err, sql.ErrNoRows) {
 			res2, err := tx.Exec(
 				`INSERT INTO issues (uuid, repo_id, number, feature_id, title, description, state, assignee, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -991,17 +1001,33 @@ func (e *Engine) applyIssues(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, res 
 		} else if err != nil {
 			return err
 		} else {
-			if _, err := tx.Exec(
-				`UPDATE issues SET number = ?, feature_id = ?, title = ?, description = ?, state = ?, assignee = ?, updated_at = ? WHERE id = ?`,
-				si.Parsed.Number, nullableInt64(featureID),
-				si.Parsed.Title, si.Description, si.Parsed.State, si.Parsed.Assignee,
-				sqliteTimestamp(si.Parsed.UpdatedAt), existingID,
-			); err != nil {
-				return fmt.Errorf("update issue %s: %w", uuid, err)
+			// Skip the UPDATE if every field is already equal — this
+			// keeps a re-import of an unchanged sync repo reporting
+			// `noop` rather than `updated`. Side-data (tags, PRs,
+			// relations) is checked separately in pass 2; we don't
+			// gate the update on those because pass 2 deletes-and-
+			// reinserts them wholesale and is its own no-op when the
+			// sets match.
+			changed := existingNumber != si.Parsed.Number ||
+				!nullableEqualInt64(existingFeatureID, featureID) ||
+				existingTitle != si.Parsed.Title ||
+				existingDescription != si.Description ||
+				existingState != si.Parsed.State ||
+				existingAssignee != si.Parsed.Assignee
+			if changed {
+				if _, err := tx.Exec(
+					`UPDATE issues SET number = ?, feature_id = ?, title = ?, description = ?, state = ?, assignee = ?, updated_at = ? WHERE id = ?`,
+					si.Parsed.Number, nullableInt64(featureID),
+					si.Parsed.Title, si.Description, si.Parsed.State, si.Parsed.Assignee,
+					sqliteTimestamp(si.Parsed.UpdatedAt), existingID,
+				); err != nil {
+					return fmt.Errorf("update issue %s: %w", uuid, err)
+				}
+				res.Updated++
+			} else {
+				res.NoOp++
 			}
 			idByUUID[uuid] = existingID
-			res.Updated++
-			_ = existingNumber
 		}
 	}
 
@@ -1162,8 +1188,15 @@ func (e *Engine) applyComments(tx *sql.Tx, sr *scannedRepo, res *ImportResult) e
 		})
 		for _, sc := range si.Comments {
 			hash := contentHashComment(sc)
-			var existingID int64
-			err := tx.QueryRow(`SELECT id FROM comments WHERE uuid = ?`, sc.Parsed.UUID).Scan(&existingID)
+			var (
+				existingID     int64
+				existingAuthor string
+				existingBody   string
+			)
+			err := tx.QueryRow(
+				`SELECT id, author, body FROM comments WHERE uuid = ?`,
+				sc.Parsed.UUID,
+			).Scan(&existingID, &existingAuthor, &existingBody)
 			if errors.Is(err, sql.ErrNoRows) {
 				if _, err := tx.Exec(
 					`INSERT INTO comments (uuid, issue_id, author, body, created_at) VALUES (?, ?, ?, ?, ?)`,
@@ -1175,7 +1208,7 @@ func (e *Engine) applyComments(tx *sql.Tx, sr *scannedRepo, res *ImportResult) e
 				res.Inserted++
 			} else if err != nil {
 				return err
-			} else {
+			} else if existingAuthor != sc.Parsed.Author || existingBody != sc.Body {
 				// Update body / author.
 				if _, err := tx.Exec(
 					`UPDATE comments SET author = ?, body = ? WHERE id = ?`,
@@ -1184,6 +1217,8 @@ func (e *Engine) applyComments(tx *sql.Tx, sr *scannedRepo, res *ImportResult) e
 					return fmt.Errorf("update comment %s: %w", sc.Parsed.UUID, err)
 				}
 				res.Updated++
+			} else {
+				res.NoOp++
 			}
 			if err := e.markSyncedTx(tx, sc.Parsed.UUID, store.SyncKindComment, hash, now); err != nil {
 				return err
@@ -1200,8 +1235,17 @@ func (e *Engine) applyDocuments(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, r
 	for _, uuid := range uuids {
 		sd := sr.Documents[uuid]
 		hash := contentHashDocument(sd)
-		var existingID int64
-		err := tx.QueryRow(`SELECT id FROM documents WHERE uuid = ?`, uuid).Scan(&existingID)
+		var (
+			existingID         int64
+			existingFilename   string
+			existingType       string
+			existingContent    string
+			existingSourcePath string
+		)
+		err := tx.QueryRow(
+			`SELECT id, filename, type, content, source_path FROM documents WHERE uuid = ?`,
+			uuid,
+		).Scan(&existingID, &existingFilename, &existingType, &existingContent, &existingSourcePath)
 		if errors.Is(err, sql.ErrNoRows) {
 			res2, err := tx.Exec(
 				`INSERT INTO documents (uuid, repo_id, filename, type, content, size_bytes, source_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -1217,14 +1261,26 @@ func (e *Engine) applyDocuments(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, r
 		} else if err != nil {
 			return err
 		} else {
-			if _, err := tx.Exec(
-				`UPDATE documents SET filename = ?, type = ?, content = ?, size_bytes = ?, source_path = ?, updated_at = ? WHERE id = ?`,
-				sd.Parsed.Filename, sd.Parsed.Type, sd.Content, len(sd.Content), sd.Parsed.SourcePath,
-				sqliteTimestamp(sd.Parsed.UpdatedAt), existingID,
-			); err != nil {
-				return fmt.Errorf("update document %s: %w", sd.Parsed.Filename, err)
+			// Same noop-vs-update gate as applyFeatures / applyIssues:
+			// only run the UPDATE if any salient field actually
+			// differs. Doc-link side-data is replaced wholesale below
+			// regardless; that's its own no-op when sets match.
+			changed := existingFilename != sd.Parsed.Filename ||
+				existingType != sd.Parsed.Type ||
+				existingContent != sd.Content ||
+				existingSourcePath != sd.Parsed.SourcePath
+			if changed {
+				if _, err := tx.Exec(
+					`UPDATE documents SET filename = ?, type = ?, content = ?, size_bytes = ?, source_path = ?, updated_at = ? WHERE id = ?`,
+					sd.Parsed.Filename, sd.Parsed.Type, sd.Content, len(sd.Content), sd.Parsed.SourcePath,
+					sqliteTimestamp(sd.Parsed.UpdatedAt), existingID,
+				); err != nil {
+					return fmt.Errorf("update document %s: %w", sd.Parsed.Filename, err)
+				}
+				res.Updated++
+			} else {
+				res.NoOp++
 			}
-			res.Updated++
 		}
 		// Replace links wholesale.
 		if err := e.replaceDocLinksTx(tx, existingID, sd.Parsed.Filename, uuid, sd.Parsed.Links, res); err != nil {
@@ -1443,6 +1499,20 @@ func nullableInt64(p *int64) any {
 		return nil
 	}
 	return *p
+}
+
+// nullableEqualInt64 compares a nullable DB column to a Go *int64.
+// Two nulls are equal; a null and a present value are not. Used by
+// applyIssues' "did anything change?" check so a re-import of an
+// unchanged feature link reports `noop` rather than `updated`.
+func nullableEqualInt64(db sql.NullInt64, want *int64) bool {
+	if !db.Valid {
+		return want == nil
+	}
+	if want == nil {
+		return false
+	}
+	return db.Int64 == *want
 }
 
 func mapKeys[V any](m map[string]V) []string {
