@@ -9,8 +9,10 @@ Companion docs: [agent-cli-principles.md](agent-cli-principles.md), [agent-cli-r
 Add a second surface — a local HTTP REST API — that exposes the same operations the CLI already supports, backed by the same SQLite store, validators, audit log, and JSON input/output schemas. Launch it via:
 
 ```
-mk api [--addr 127.0.0.1:7777] [--token <secret>] [--db <path>]
+mk api [--addr 127.0.0.1:5320] [--token <secret>] [--db <path>]
 ```
+
+`--addr` defaults to `127.0.0.1:5320`. `--port` is a convenience shorthand that swaps just the port (e.g. `--port 8080`). Either flag can override the bind address.
 
 The CLI stays the primary surface; the API is for callers that aren't a child process (web UIs, IDE plugins, long-running agents, future MCP server bridge). Both surfaces MUST stay functionally equivalent — anything you can do via `mk issue add --json` you can do via `POST /repos/{prefix}/issues`, and vice versa.
 
@@ -73,8 +75,8 @@ Standard library `net/http` with Go 1.22's pattern matching (`mux.HandleFunc("PO
 
 ### 4.3 Auth
 
-- **Loopback-only by default.** `--addr` defaults to `127.0.0.1:7777`. Binding to `0.0.0.0` requires the operator to opt in by passing the explicit address.
-- **Optional bearer token.** `--token <secret>` (or env `MK_API_TOKEN`) enables `Authorization: Bearer <token>` checks. When unset, requests are accepted without an Authorization header (matches the "trust the loopback" posture). When set, missing/wrong token → `401`.
+- **Loopback-only by default.** `--addr` defaults to `127.0.0.1:5320`. Binding to `0.0.0.0` requires the operator to opt in by passing the explicit address.
+- **Optional bearer token (shared secret).** `--token <secret>` (or env `MK_API_TOKEN`) enables `Authorization: Bearer <token>` checks. When unset, requests are accepted without an Authorization header (matches the "trust the loopback" posture). When set, missing/wrong token → `401`. One token serves all callers — this is shared-secret simplicity, not multi-user IAM.
 - **No cookies, no sessions, no refresh.** Bearer is the only mechanism. Easy to integrate from `curl`, `httpx`, or a browser fetch.
 - The token is compared with `subtle.ConstantTimeCompare`.
 
@@ -173,9 +175,9 @@ All bodies + responses are `application/json`. `{prefix}` is the 4-char repo pre
 | `POST`   | `/repos/{prefix}/documents/{filename}/rename`                | `mk doc rename` |
 | `POST`   | `/repos/{prefix}/documents/{filename}/links`                 | `mk doc link` (issue or feature in body) |
 | `DELETE` | `/repos/{prefix}/documents/{filename}/links`                 | `mk doc unlink` |
-| `POST`   | `/repos/{prefix}/documents/{filename}/export`                | `mk doc export` (writes to disk on the server) |
+| `GET`    | `/repos/{prefix}/documents/{filename}/download`              | (new) — streams the doc body as `text/markdown` with `Content-Disposition: attachment; filename="<name>"` so browsers / `curl -O` save it directly. Replaces the CLI's `doc export` for HTTP callers. |
 
-`mk doc export` is unusual because it writes to the server's filesystem. v1 keeps it (it works for local-only use), but the API explicitly documents that the path is server-side. Future remote deploy would gate this behind a config flag.
+**Doc export differs from the CLI.** `mk doc export` writes to the server's filesystem, which only makes sense for a local-process caller. The API replaces it with `GET /documents/{filename}/download`, which streams the doc body as the response with an attachment-style `Content-Disposition` so browsers and `curl -O` save it directly. The download endpoint is read-only — no audit row, no `?dry_run`. Callers that want the body inline (without download semantics) keep using `GET /documents/{filename}` with the existing `?with_content=true` shape, which returns it inside the JSON envelope.
 
 ### 5.7 History
 
@@ -303,11 +305,10 @@ These are mechanical moves. They land in PR 1 alongside the scaffolding so the A
 
 ## 12. Open questions
 
-1. **Default port.** 7777 is unassigned and memorable. Confirm or pick another (8087, 9876).
-2. **Persistent token store.** If the operator wants the token to survive restarts, do we read it from `~/.mini-kanban/api-token` on first boot? v1 says no — operators set `MK_API_TOKEN` themselves or pass `--token`. Revisit if friction shows up.
-3. **Auto-start on `mk tui`.** Out of scope. Future work where the TUI can talk to a remote `mk api` instead of a local SQLite file is possible but is a much bigger refactor.
-4. **OpenAPI doc generation.** We already publish JSON Schemas per input; full OpenAPI 3.1 is reflectable from the same registry plus the route table. Defer to a later PR — `mk schema all` already covers the agent use case.
-5. **Filesystem-touching endpoints (`doc export`, `doc add --from-path`).** Keep server-local v1; revisit if a remote-deploy use case appears.
+1. **Persistent token store.** If the operator wants the token to survive restarts, do we read it from `~/.mini-kanban/api-token` on first boot? v1 says no — operators set `MK_API_TOKEN` themselves or pass `--token`. Revisit if friction shows up.
+2. **Auto-start on `mk tui`.** Out of scope. Future work where the TUI can talk to a remote `mk api` instead of a local SQLite file is possible but is a much bigger refactor.
+3. **OpenAPI doc generation.** We already publish JSON Schemas per input; full OpenAPI 3.1 is reflectable from the same registry plus the route table. Defer to a later PR — `mk schema all` already covers the agent use case.
+4. **`doc add --from-path` over HTTP.** The CLI flag reads from the server's filesystem. The API equivalent is uploading content in the request body (already covered by `POST /documents`), so no separate endpoint is needed. If a remote deploy later wants "import this server-local file", we'd add it then.
 
 ## 13. Definition of done (for the whole effort, not PR 1)
 
