@@ -159,26 +159,48 @@ func (s *Store) UpdateRepoByUUID(uuid string, name, remoteURL *string, nextIssue
 	return nil
 }
 
-// RecomputeNextIssueNumber sets repos.next_issue_number to MAX(issues.number)
-// + 1 for the given repo. Called once per repo at the end of `mk sync
-// import` so a remotely-created MINI-50 doesn't get re-used locally
-// the next time `mk issue create` runs.
+// RecomputeNextIssueNumber pulls repos.next_issue_number forward to
+// MAX(current value, MAX(issues.number) + 1). Called once per repo
+// at the end of `mk sync import` so a remotely-created MINI-50 (now
+// in DB) doesn't get re-used locally the next time `mk issue create`
+// runs.
 //
-// next_issue_number is now advisory (the design doc downgraded it
-// from a hard counter once collision handling exists), but it's a
+// We deliberately keep the *higher* of the cached counter and the
+// max+1, rather than blindly resetting to max+1: if a repo with
+// next_issue_number = 50 lost all its issues to a remote sweep, we
+// don't want to start handing out MINI-1 again — that namespace is
+// "owned" by the deletions and could collide if someone restores
+// the deleted records on another machine. The high-water mark is
+// the safe lower bound.
+//
+// next_issue_number is advisory (the design doc downgraded it from
+// a hard counter once collision handling exists), but it's a
 // fast-path cache for the per-repo MAX query that issue create still
 // relies on, so we keep it correct.
 func (s *Store) RecomputeNextIssueNumber(repoID int64) error {
-	var maxNum sql.NullInt64
-	err := s.DB.QueryRow(`SELECT MAX(number) FROM issues WHERE repo_id = ?`, repoID).Scan(&maxNum)
-	if err != nil {
+	var (
+		maxNum  sql.NullInt64
+		current int64
+	)
+	if err := s.DB.QueryRow(`SELECT MAX(number) FROM issues WHERE repo_id = ?`, repoID).Scan(&maxNum); err != nil {
 		return err
 	}
-	next := int64(1)
-	if maxNum.Valid {
-		next = maxNum.Int64 + 1
+	if err := s.DB.QueryRow(`SELECT next_issue_number FROM repos WHERE id = ?`, repoID).Scan(&current); err != nil {
+		return err
 	}
-	_, err = s.DB.Exec(`UPDATE repos SET next_issue_number = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, next, repoID)
+	derived := int64(1)
+	if maxNum.Valid {
+		derived = maxNum.Int64 + 1
+	}
+	if derived <= current {
+		// Already correct (or higher). Don't bump updated_at — no
+		// state change.
+		return nil
+	}
+	_, err := s.DB.Exec(
+		`UPDATE repos SET next_issue_number = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		derived, repoID,
+	)
 	return err
 }
 

@@ -111,6 +111,8 @@ func renderText(w io.Writer, v any) error {
 		}
 	case exportResult:
 		printExportResult(w, x)
+	case importResult:
+		printImportResult(w, x)
 	case message:
 		fmt.Fprintln(w, x.Text)
 	default:
@@ -358,4 +360,56 @@ func printExportResult(w io.Writer, r exportResult) {
 	fmt.Fprintf(w, "  documents: %d\n", r.Documents)
 	fmt.Fprintf(w, "  files:     %d\n", r.Files)
 	fmt.Fprintf(w, "  bytes:     %d\n", r.BytesWritten)
+}
+
+// printImportResult mirrors printExportResult: a one-line-per-kind
+// counts summary plus per-event lists for the observable side
+// effects (renumbers, renames, deletions, dangling refs).
+func printImportResult(w io.Writer, r importResult) {
+	if r.ImportResult == nil {
+		return
+	}
+	fmt.Fprintf(w, "Imported from %s\n", r.Source)
+	fmt.Fprintf(w, "  repos:     %d\n", r.Repos)
+	fmt.Fprintf(w, "  features:  %d\n", r.Features)
+	fmt.Fprintf(w, "  issues:    %d\n", r.Issues)
+	fmt.Fprintf(w, "  comments:  %d\n", r.Comments)
+	fmt.Fprintf(w, "  documents: %d\n", r.Documents)
+	fmt.Fprintf(w, "  inserted:  %d\n", r.Inserted)
+	fmt.Fprintf(w, "  updated:   %d\n", r.Updated)
+	fmt.Fprintf(w, "  noop:      %d\n", r.NoOp)
+	if len(r.Renumbered) > 0 {
+		fmt.Fprintln(w, "Renumbered:")
+		for _, e := range r.Renumbered {
+			fmt.Fprintf(w, "  %s-%d -> %s-%d (uuid=%s)\n", e.Prefix, e.OldNumber, e.Prefix, e.NewNumber, e.UUID)
+		}
+	}
+	if len(r.Renamed) > 0 {
+		fmt.Fprintln(w, "Renamed:")
+		for _, e := range r.Renamed {
+			fmt.Fprintf(w, "  %s %s -> %s (uuid=%s)\n", e.Kind, e.Old, e.New, e.UUID)
+		}
+	}
+	if len(r.Deleted) > 0 {
+		fmt.Fprintln(w, "Deleted:")
+		for _, e := range r.Deleted {
+			label := e.Label
+			if label == "" {
+				label = e.UUID
+			}
+			fmt.Fprintf(w, "  %s %s\n", e.Kind, label)
+		}
+	}
+	if len(r.Dangling) > 0 {
+		fmt.Fprintln(w, "Dangling references (target uuid not in DB):")
+		for _, d := range r.Dangling {
+			fmt.Fprintf(w, "  %s -> %s %s (target uuid=%s)\n", d.From, d.Kind, d.TargetLabel, d.TargetUUID)
+		}
+	}
+	if len(r.Warnings) > 0 {
+		fmt.Fprintln(w, "Warnings:")
+		for _, w2 := range r.Warnings {
+			fmt.Fprintf(w, "  %s\n", w2)
+		}
+	}
 }
