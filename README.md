@@ -63,12 +63,21 @@ to require `Authorization: Bearer <token>`.
     curl http://127.0.0.1:5320/healthz
 
 The API is intended for local-only callers (web UIs, IDE plugins, agents
-that aren't a child process). Currently exposes `/healthz`, `/schema*`,
-`/repos*`, the full issue / comment / relation / pull-request / tag
-surface under `/repos/{prefix}/issues*`, and the feature surface under
+that aren't a child process). Exposes `/healthz`, `/schema*`, `/repos*`,
+the full issue / comment / relation / pull-request / tag surface under
+`/repos/{prefix}/issues*`, the feature surface under
 `/repos/{prefix}/features*` including bulk-context (`/issues/{key}/brief`),
 plan view (`/features/{slug}/plan`), and atomic claim
-(`POST /features/{slug}/next`). Documents and history follow.
+(`POST /features/{slug}/next`), the document surface under
+`/repos/{prefix}/documents*` (CRUD + rename + link/unlink), and an audit
+log under `/history` (cross-repo) and `/repos/{prefix}/history` (scoped).
+
+Documents support a non-JSON streaming download endpoint —
+`GET /repos/{prefix}/documents/{filename}/download` returns the raw
+markdown body so `curl -O` saves a file directly. This replaces the
+CLI's `mk doc export --to-path`; the API never reads or writes the
+server filesystem.
+
 Every mutation accepts `?dry_run=true` (or `X-Dry-Run: 1`); set
 `X-Actor: <name>` so audit rows attribute correctly (and to claim
 work — `POST /features/{slug}/next` requires it). See
