@@ -172,37 +172,6 @@ func (e *notFoundError) Unwrap() error { return store.ErrNotFound }
 // Stub implementations follow. Real bodies arrive verb-by-verb in
 // later commits.
 
-func (c *remoteClient) ListComments(ctx context.Context, repo *model.Repo, key string) ([]*model.Comment, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) AddComment(ctx context.Context, repo *model.Repo, in inputs.CommentAddInput, dryRun bool) (*model.Comment, error) {
-	return nil, errors.New("not implemented")
-}
-
-func (c *remoteClient) LinkRelation(ctx context.Context, repo *model.Repo, in inputs.LinkInput, dryRun bool) (*model.Relation, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) UnlinkRelation(ctx context.Context, repo *model.Repo, in inputs.UnlinkInput, dryRun bool) (*RelationDeletePreview, int64, error) {
-	return nil, 0, errors.New("not implemented")
-}
-
-func (c *remoteClient) ListPRs(ctx context.Context, repo *model.Repo, key string) ([]*model.PullRequest, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) AttachPR(ctx context.Context, repo *model.Repo, key, url string, dryRun bool) (*model.PullRequest, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) DetachPR(ctx context.Context, repo *model.Repo, key, url string, dryRun bool) (*PRDetachPreview, int64, error) {
-	return nil, 0, errors.New("not implemented")
-}
-
-func (c *remoteClient) AddTags(ctx context.Context, repo *model.Repo, key string, tags []string, dryRun bool) (*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) RemoveTags(ctx context.Context, repo *model.Repo, key string, tags []string, dryRun bool) (*model.Issue, error) {
-	return nil, errors.New("not implemented")
-}
-
 func (c *remoteClient) ListDocuments(ctx context.Context, repo *model.Repo, typeStr string) ([]*model.Document, error) {
 	return nil, errors.New("not implemented")
 }

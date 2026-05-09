@@ -1,15 +1,14 @@
 package cli
 
 import (
+	"context"
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
 	"github.com/mrgeoffrich/mini-kanban/internal/inputio"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
-	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
 
 func newTagCmd() *cobra.Command {
@@ -87,82 +86,29 @@ func tagRmCmd() *cobra.Command {
 }
 
 func mutateTags(key string, rawTags []string, add, strict bool) error {
-	tags, err := store.NormalizeTags(rawTags)
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	s, err := openStore()
+	defer c.Close()
+	if strict && !isIssueKey(key) {
+		return fmt.Errorf("issue_key %q must be canonical (e.g. \"MINI-42\")", key)
+	}
+	repo, err := repoForIssueKey(c, key)
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	resolve := resolveIssueByKey
-	if strict {
-		resolve = resolveIssueKeyStrict
+	var updated *model.Issue
+	if add {
+		updated, err = c.AddTags(context.Background(), repo, key, rawTags, opts.dryRun)
+	} else {
+		updated, err = c.RemoveTags(context.Background(), repo, key, rawTags, opts.dryRun)
 	}
-	iss, err := resolve(s, key)
 	if err != nil {
 		return err
 	}
 	if opts.dryRun {
-		projected := *iss
-		projected.Tags = projectTags(iss.Tags, tags, add)
-		return emitDryRun(&projected)
+		return emitDryRun(updated)
 	}
-	op := "tag.add"
-	if add {
-		err = s.AddTagsToIssue(iss.ID, tags)
-	} else {
-		err = s.RemoveTagsFromIssue(iss.ID, tags)
-		op = "tag.remove"
-	}
-	if err != nil {
-		return err
-	}
-	updated, err := s.GetIssueByID(iss.ID)
-	if err != nil {
-		return err
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &iss.RepoID,
-		Op:     op, Kind: "issue",
-		TargetID: &iss.ID, TargetLabel: iss.Key,
-		Details: strings.Join(tags, ","),
-	})
 	return emit(updated)
-}
-
-// projectTags returns the tag set that would result from add-or-remove
-// applied to existing. Order is preserved on add (existing first, then
-// new); order is preserved on remove (existing minus the to-remove set).
-// Used only by `--dry-run` so callers can show the resulting tag list
-// without touching the database.
-func projectTags(existing, delta []string, add bool) []string {
-	have := make(map[string]struct{}, len(existing))
-	for _, t := range existing {
-		have[t] = struct{}{}
-	}
-	if add {
-		out := append([]string{}, existing...)
-		for _, t := range delta {
-			if _, ok := have[t]; ok {
-				continue
-			}
-			have[t] = struct{}{}
-			out = append(out, t)
-		}
-		return out
-	}
-	remove := make(map[string]struct{}, len(delta))
-	for _, t := range delta {
-		remove[t] = struct{}{}
-	}
-	out := make([]string, 0, len(existing))
-	for _, t := range existing {
-		if _, drop := remove[t]; drop {
-			continue
-		}
-		out = append(out, t)
-	}
-	return out
 }

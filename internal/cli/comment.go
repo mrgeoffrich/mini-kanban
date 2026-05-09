@@ -1,13 +1,13 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
 	"github.com/mrgeoffrich/mini-kanban/internal/inputio"
-	"github.com/mrgeoffrich/mini-kanban/internal/model"
 )
 
 func newCommentCmd() *cobra.Command {
@@ -40,7 +40,7 @@ func commentAddCmd() *cobra.Command {
 				if in.IssueKey == "" || in.Author == "" || in.Body == "" {
 					return fmt.Errorf("issue_key, author, and body are required")
 				}
-				return addComment(in.IssueKey, in.Author, in.Body, true)
+				return addComment(*in, true)
 			}
 			if len(args) != 1 {
 				return fmt.Errorf("requires <KEY> positional or --json")
@@ -52,7 +52,11 @@ func commentAddCmd() *cobra.Command {
 			if author == "" {
 				return fmt.Errorf("--as is required")
 			}
-			return addComment(args[0], author, text, false)
+			return addComment(inputs.CommentAddInput{
+				IssueKey: args[0],
+				Author:   author,
+				Body:     text,
+			}, false)
 		},
 	}
 	cmd.Flags().StringVar(&author, "as", "", "comment author name (required when not using --json)")
@@ -62,38 +66,29 @@ func commentAddCmd() *cobra.Command {
 	return cmd
 }
 
-func addComment(key, author, body string, strict bool) error {
-	s, err := openStore()
+func addComment(in inputs.CommentAddInput, strict bool) error {
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	resolve := resolveIssueByKey
+	defer c.Close()
 	if strict {
-		resolve = resolveIssueKeyStrict
+		if !isIssueKey(in.IssueKey) {
+			return fmt.Errorf("issue_key %q must be canonical (e.g. \"MINI-42\")", in.IssueKey)
+		}
 	}
-	iss, err := resolve(s, key)
+	repo, err := repoForIssueKey(c, in.IssueKey)
+	if err != nil {
+		return err
+	}
+	cm, err := c.AddComment(context.Background(), repo, in, opts.dryRun)
 	if err != nil {
 		return err
 	}
 	if opts.dryRun {
-		return emitDryRun(&model.Comment{
-			IssueID: iss.ID,
-			Author:  author,
-			Body:    body,
-		})
+		return emitDryRun(cm)
 	}
-	c, err := s.CreateComment(iss.ID, author, body)
-	if err != nil {
-		return err
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &iss.RepoID,
-		Op:     "comment.add", Kind: "issue",
-		TargetID: &iss.ID, TargetLabel: iss.Key,
-		Details: "by " + author,
-	})
-	return emit(c)
+	return emit(cm)
 }
 
 func commentListCmd() *cobra.Command {
@@ -102,16 +97,16 @@ func commentListCmd() *cobra.Command {
 		Short: "List comments on an issue",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStore()
+			c, err := openClient()
 			if err != nil {
 				return err
 			}
-			defer s.Close()
-			iss, err := resolveIssueByKey(s, args[0])
+			defer c.Close()
+			repo, err := repoForIssueKey(c, args[0])
 			if err != nil {
 				return err
 			}
-			cs, err := s.ListComments(iss.ID)
+			cs, err := c.ListComments(context.Background(), repo, args[0])
 			if err != nil {
 				return err
 			}

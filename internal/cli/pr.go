@@ -1,14 +1,13 @@
 package cli
 
 import (
+	"context"
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
 	"github.com/mrgeoffrich/mini-kanban/internal/inputio"
-	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
 
@@ -61,35 +60,25 @@ func attachPR(key, prURL string, strict bool) error {
 	if err != nil {
 		return err
 	}
-	s, err := openStore()
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	resolve := resolveIssueByKey
-	if strict {
-		resolve = resolveIssueKeyStrict
+	defer c.Close()
+	if strict && !isIssueKey(key) {
+		return fmt.Errorf("issue_key %q must be canonical (e.g. \"MINI-42\")", key)
 	}
-	iss, err := resolve(s, key)
+	repo, err := repoForIssueKey(c, key)
+	if err != nil {
+		return err
+	}
+	created, err := c.AttachPR(context.Background(), repo, key, pr, opts.dryRun)
 	if err != nil {
 		return err
 	}
 	if opts.dryRun {
-		return emitDryRun(&model.PullRequest{
-			IssueID: iss.ID,
-			URL:     pr,
-		})
+		return emitDryRun(created)
 	}
-	created, err := s.AttachPR(iss.ID, pr)
-	if err != nil {
-		return err
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &iss.RepoID,
-		Op:     "pr.attach", Kind: "issue",
-		TargetID: &iss.ID, TargetLabel: iss.Key,
-		Details: pr,
-	})
 	return emit(created)
 }
 
@@ -128,56 +117,31 @@ func prDetachCmd() *cobra.Command {
 }
 
 func detachPR(key, prURL string, strict bool) error {
-	s, err := openStore()
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	resolve := resolveIssueByKey
-	if strict {
-		resolve = resolveIssueKeyStrict
+	defer c.Close()
+	if strict && !isIssueKey(key) {
+		return fmt.Errorf("issue_key %q must be canonical (e.g. \"MINI-42\")", key)
 	}
-	iss, err := resolve(s, key)
+	repo, err := repoForIssueKey(c, key)
 	if err != nil {
 		return err
 	}
-	clean := strings.TrimSpace(prURL)
+	preview, _, err := c.DetachPR(context.Background(), repo, key, prURL, opts.dryRun)
+	if err != nil {
+		return err
+	}
 	if opts.dryRun {
-		// Confirm the URL is actually attached without removing it.
-		prs, err := s.ListPRs(iss.ID)
-		if err != nil {
-			return err
-		}
-		matched := false
-		for _, p := range prs {
-			if p.URL == clean {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return fmt.Errorf("no PR matching %q on %s", prURL, iss.Key)
-		}
 		return emitDryRun(&prDetachPreview{
-			IssueKey:    iss.Key,
-			URL:         clean,
-			WouldRemove: 1,
+			IssueKey:    preview.IssueKey,
+			URL:         preview.URL,
+			WouldRemove: preview.WouldRemove,
 		})
 	}
-	n, err := s.DetachPR(iss.ID, clean)
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return fmt.Errorf("no PR matching %q on %s", prURL, iss.Key)
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &iss.RepoID,
-		Op:     "pr.detach", Kind: "issue",
-		TargetID: &iss.ID, TargetLabel: iss.Key,
-		Details: clean,
-	})
-	return ok("detached %s from %s", prURL, iss.Key)
+	canonical, _ := c.ResolveIssueKey(context.Background(), repo, key)
+	return ok("detached %s from %s", prURL, canonical)
 }
 
 // prDetachPreview is the dry-run payload for `mk pr detach`.
@@ -193,16 +157,16 @@ func prListCmd() *cobra.Command {
 		Short: "List pull requests attached to an issue",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStore()
+			c, err := openClient()
 			if err != nil {
 				return err
 			}
-			defer s.Close()
-			iss, err := resolveIssueByKey(s, args[0])
+			defer c.Close()
+			repo, err := repoForIssueKey(c, args[0])
 			if err != nil {
 				return err
 			}
-			prs, err := s.ListPRs(iss.ID)
+			prs, err := c.ListPRs(context.Background(), repo, args[0])
 			if err != nil {
 				return err
 			}
