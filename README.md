@@ -53,6 +53,19 @@ mk issue list --state in_progress -o json | jq '.[] | .key'
 
 JSON is the contract. Text mode is for humans and may shift between releases.
 
+## REST API
+
+`mk api` exposes the same operations over HTTP, backed by the same SQLite
+file. Defaults to `127.0.0.1:5320`. Set `MK_API_TOKEN` (or pass `--token`)
+to require `Authorization: Bearer <token>`.
+
+    mk api &
+    curl http://127.0.0.1:5320/healthz
+
+The API is intended for local-only callers (web UIs, IDE plugins, agents
+that aren't a child process). See `docs/rest-api-design.md` for the full
+route table; Phase 1 covers `/healthz`, `/schema*`, and `/repos*`.
+
 ## AI-agent integration
 
 `mk` ships a Claude Code skill that documents the full surface for agents. To install it into another repo, run from anywhere inside that repo:
