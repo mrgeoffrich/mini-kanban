@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
-	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
 
@@ -169,43 +167,3 @@ type notFoundError struct {
 
 func (e *notFoundError) Unwrap() error { return store.ErrNotFound }
 
-// Stub implementations follow. Real bodies arrive verb-by-verb in
-// later commits.
-
-func (c *remoteClient) ListDocuments(ctx context.Context, repo *model.Repo, typeStr string) ([]*model.Document, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) ShowDocument(ctx context.Context, repo *model.Repo, filename string, withContent bool) (*DocView, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) GetDocumentRaw(ctx context.Context, repo *model.Repo, filename string) (*model.Document, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) DownloadDocument(ctx context.Context, repo *model.Repo, filename string) ([]byte, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) CreateDocument(ctx context.Context, repo *model.Repo, in DocCreateInput, dryRun bool) (*model.Document, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) UpsertDocument(ctx context.Context, repo *model.Repo, in DocCreateInput, dryRun bool) (*model.Document, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) EditDocument(ctx context.Context, repo *model.Repo, filename string, newType *string, newContent *string, dryRun bool) (*model.Document, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) RenameDocument(ctx context.Context, repo *model.Repo, oldName, newName, typeStr string, dryRun bool) (*model.Document, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) DeleteDocument(ctx context.Context, repo *model.Repo, filename string, dryRun bool) (*model.Document, *DocumentDeletePreview, error) {
-	return nil, nil, errors.New("not implemented")
-}
-func (c *remoteClient) LinkDocument(ctx context.Context, repo *model.Repo, in inputs.DocLinkInput, dryRun bool) (*model.DocumentLink, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) UnlinkDocument(ctx context.Context, repo *model.Repo, in inputs.DocUnlinkInput, dryRun bool) (*DocumentUnlinkPreview, int64, error) {
-	return nil, 0, errors.New("not implemented")
-}
-
-func (c *remoteClient) ListHistory(ctx context.Context, f store.HistoryFilter) ([]*model.HistoryEntry, error) {
-	return nil, errors.New("not implemented")
-}

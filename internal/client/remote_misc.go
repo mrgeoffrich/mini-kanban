@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -161,9 +160,6 @@ func (c *remoteClient) doBody(ctx context.Context, method, path string, query ur
 	}
 	return wrapStoreError(herr)
 }
-
-// silence unused import errors for now
-var _ = errors.New
 
 // ----- PRs -----
 

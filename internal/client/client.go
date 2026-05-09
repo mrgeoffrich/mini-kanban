@@ -131,7 +131,10 @@ type Client interface {
 	UnlinkDocument(ctx context.Context, repo *model.Repo, in inputs.DocUnlinkInput, dryRun bool) (preview *DocumentUnlinkPreview, removed int64, err error)
 
 	// ----- History -----
-	ListHistory(ctx context.Context, f store.HistoryFilter) ([]*model.HistoryEntry, error)
+	// ListHistory queries the audit log. When repo is non-nil, results
+	// are scoped to that repo (the remote backend uses the repo's
+	// prefix in the URL). repo == nil means "across all repos".
+	ListHistory(ctx context.Context, repo *model.Repo, f store.HistoryFilter) ([]*model.HistoryEntry, error)
 }
 
 // IssueFilter mirrors store.IssueFilter but also carries an optional

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
 	"github.com/mrgeoffrich/mini-kanban/internal/git"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
@@ -114,43 +113,16 @@ func (c *localClient) EnsureRepo(ctx context.Context, info *git.Info) (*model.Re
 	return created, true, nil
 }
 
-// Stub method bodies live in this file initially. Real implementations
-// arrive verb-by-verb in subsequent commits.
-
-func (c *localClient) ListDocuments(ctx context.Context, repo *model.Repo, typeStr string) ([]*model.Document, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) ShowDocument(ctx context.Context, repo *model.Repo, filename string, withContent bool) (*DocView, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) GetDocumentRaw(ctx context.Context, repo *model.Repo, filename string) (*model.Document, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) DownloadDocument(ctx context.Context, repo *model.Repo, filename string) ([]byte, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) CreateDocument(ctx context.Context, repo *model.Repo, in DocCreateInput, dryRun bool) (*model.Document, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) UpsertDocument(ctx context.Context, repo *model.Repo, in DocCreateInput, dryRun bool) (*model.Document, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) EditDocument(ctx context.Context, repo *model.Repo, filename string, newType *string, newContent *string, dryRun bool) (*model.Document, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) RenameDocument(ctx context.Context, repo *model.Repo, oldName, newName, typeStr string, dryRun bool) (*model.Document, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) DeleteDocument(ctx context.Context, repo *model.Repo, filename string, dryRun bool) (*model.Document, *DocumentDeletePreview, error) {
-	return nil, nil, errors.New("not implemented")
-}
-func (c *localClient) LinkDocument(ctx context.Context, repo *model.Repo, in inputs.DocLinkInput, dryRun bool) (*model.DocumentLink, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) UnlinkDocument(ctx context.Context, repo *model.Repo, in inputs.DocUnlinkInput, dryRun bool) (*DocumentUnlinkPreview, int64, error) {
-	return nil, 0, errors.New("not implemented")
-}
-
-func (c *localClient) ListHistory(ctx context.Context, f store.HistoryFilter) ([]*model.HistoryEntry, error) {
-	return nil, errors.New("not implemented")
+func (c *localClient) ListHistory(ctx context.Context, repo *model.Repo, f store.HistoryFilter) ([]*model.HistoryEntry, error) {
+	if repo != nil {
+		f.RepoID = &repo.ID
+	}
+	rows, err := c.store.ListHistory(f)
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []*model.HistoryEntry{}
+	}
+	return rows, nil
 }

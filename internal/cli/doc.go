@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"errors"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
+	"github.com/mrgeoffrich/mini-kanban/internal/client"
 	"github.com/mrgeoffrich/mini-kanban/internal/inputio"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
@@ -37,7 +38,7 @@ func newDocCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "doc", Short: "Manage per-repo text documents and their links to issues/features"}
 	cmd.AddCommand(
 		docAddCmd(), docUpsertCmd(), docListCmd(), docShowCmd(),
-		docEditCmd(), docRenameCmd(), docExportCmd(), docRmCmd(),
+		docEditCmd(), docRenameCmd(), docExportCmd(), docDownloadCmd(), docRmCmd(),
 		docLinkCmd(), docUnlinkCmd(),
 	)
 	return cmd
@@ -256,6 +257,9 @@ func docAddCmd() *cobra.Command {
 				}
 				return createDocument(resolved)
 			}
+			if cmd.Flags().Changed("from-path") && inRemoteMode() {
+				return fmt.Errorf("--from-path is not supported in remote mode (the API cannot read the client's filesystem); pass --content/--content-file with the filename positional instead")
+			}
 			pos := ""
 			if len(args) == 1 {
 				pos = args[0]
@@ -270,41 +274,33 @@ func docAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&typeStr, "type", "", "document type (e.g. architecture, designs, user-docs)")
 	cmd.Flags().StringVar(&content, "content", "", "content text or '-' for stdin")
 	cmd.Flags().StringVar(&contentFile, "content-file", "", "path to a markdown file")
-	cmd.Flags().StringVar(&fromPath, "from-path", "", "derive filename (and optionally type+content) from a repo-relative path")
+	cmd.Flags().StringVar(&fromPath, "from-path", "", "derive filename (and optionally type+content) from a repo-relative path (local mode only)")
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }
 
 func createDocument(in *docInputs) error {
-	s, err := openStore()
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	repo, err := resolveRepo(s)
+	defer c.Close()
+	repo, err := resolveRepoC(c)
+	if err != nil {
+		return err
+	}
+	d, err := c.CreateDocument(context.Background(), repo, client.DocCreateInput{
+		Filename:   in.Filename,
+		Type:       in.Type,
+		Body:       in.Body,
+		SourcePath: in.SourcePath,
+	}, opts.dryRun)
 	if err != nil {
 		return err
 	}
 	if opts.dryRun {
-		return emitDryRun(&model.Document{
-			RepoID:     repo.ID,
-			Filename:   in.Filename,
-			Type:       in.Type,
-			SizeBytes:  int64(len(in.Body)),
-			SourcePath: in.SourcePath,
-		})
+		return emitDryRun(d)
 	}
-	d, err := s.CreateDocument(repo.ID, in.Filename, in.Type, in.Body, in.SourcePath)
-	if err != nil {
-		return err
-	}
-	d.Content = "" // don't echo body on add
-	recordOp(s, model.HistoryEntry{
-		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
-		Op: "document.create", Kind: "document",
-		TargetID: &d.ID, TargetLabel: d.Filename,
-		Details: "type=" + string(d.Type),
-	})
 	if opts.output == outputJSON {
 		return emit(d)
 	}
@@ -338,6 +334,9 @@ func docUpsertCmd() *cobra.Command {
 				}
 				return upsertDocument(resolved)
 			}
+			if cmd.Flags().Changed("from-path") && inRemoteMode() {
+				return fmt.Errorf("--from-path is not supported in remote mode (the API cannot read the client's filesystem); pass --content/--content-file with the filename positional instead")
+			}
 			pos := ""
 			if len(args) == 1 {
 				pos = args[0]
@@ -352,94 +351,38 @@ func docUpsertCmd() *cobra.Command {
 	cmd.Flags().StringVar(&typeStr, "type", "", "document type (e.g. architecture, designs, user-docs)")
 	cmd.Flags().StringVar(&content, "content", "", "content text or '-' for stdin")
 	cmd.Flags().StringVar(&contentFile, "content-file", "", "path to a markdown file")
-	cmd.Flags().StringVar(&fromPath, "from-path", "", "derive filename (and optionally type+content) from a repo-relative path")
+	cmd.Flags().StringVar(&fromPath, "from-path", "", "derive filename (and optionally type+content) from a repo-relative path (local mode only)")
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }
 
 func upsertDocument(in *docInputs) error {
-	s, err := openStore()
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	repo, err := resolveRepo(s)
+	defer c.Close()
+	repo, err := resolveRepoC(c)
 	if err != nil {
 		return err
 	}
-	existing, err := s.GetDocumentByFilename(repo.ID, in.Filename, false)
-	if errors.Is(err, store.ErrNotFound) {
-		if opts.dryRun {
-			return emitDryRun(&model.Document{
-				RepoID:     repo.ID,
-				Filename:   in.Filename,
-				Type:       in.Type,
-				SizeBytes:  int64(len(in.Body)),
-				SourcePath: in.SourcePath,
-			})
-		}
-		d, err := s.CreateDocument(repo.ID, in.Filename, in.Type, in.Body, in.SourcePath)
-		if err != nil {
-			return err
-		}
-		d.Content = ""
-		recordOp(s, model.HistoryEntry{
-			RepoID: &repo.ID, RepoPrefix: repo.Prefix,
-			Op: "document.create", Kind: "document",
-			TargetID: &d.ID, TargetLabel: d.Filename,
-			Details: "type=" + string(d.Type),
-		})
-		if opts.output == outputJSON {
-			return emit(d)
-		}
-		return ok("Created %s in %s (type=%s, %d bytes)",
-			d.Filename, repo.Prefix, d.Type, d.SizeBytes)
-	}
+	d, err := c.UpsertDocument(context.Background(), repo, client.DocCreateInput{
+		Filename:   in.Filename,
+		Type:       in.Type,
+		Body:       in.Body,
+		SourcePath: in.SourcePath,
+	}, opts.dryRun)
 	if err != nil {
 		return err
-	}
-	var newType *model.DocumentType
-	if in.Type != existing.Type {
-		t := in.Type
-		newType = &t
-	}
-	body := in.Body
-	var newSource *string
-	if in.SourcePath != "" && in.SourcePath != existing.SourcePath {
-		sp := in.SourcePath
-		newSource = &sp
 	}
 	if opts.dryRun {
-		projected := *existing
-		projected.Type = in.Type
-		projected.SizeBytes = int64(len(body))
-		if newSource != nil {
-			projected.SourcePath = *newSource
-		}
-		return emitDryRun(&projected)
+		return emitDryRun(d)
 	}
-	if err := s.UpdateDocument(existing.ID, newType, &body, newSource); err != nil {
-		return err
-	}
-	updated, err := s.GetDocumentByID(existing.ID, false)
-	if err != nil {
-		return err
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
-		Op: "document.update", Kind: "document",
-		TargetID: &updated.ID, TargetLabel: updated.Filename,
-		Details: updatedFieldList(map[string]bool{
-			"type":        newType != nil,
-			"content":     true,
-			"source_path": newSource != nil,
-		}),
-	})
 	if opts.output == outputJSON {
-		return emit(updated)
+		return emit(d)
 	}
 	return ok("Updated %s in %s (type=%s, %d bytes)",
-		updated.Filename, repo.Prefix, updated.Type, updated.SizeBytes)
+		d.Filename, repo.Prefix, d.Type, d.SizeBytes)
 }
 
 func docListCmd() *cobra.Command {
@@ -448,24 +391,16 @@ func docListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List documents in the current repo",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStore()
+			c, err := openClient()
 			if err != nil {
 				return err
 			}
-			defer s.Close()
-			repo, err := resolveRepo(s)
+			defer c.Close()
+			repo, err := resolveRepoC(c)
 			if err != nil {
 				return err
 			}
-			f := store.DocumentFilter{RepoID: repo.ID}
-			if typeStr != "" {
-				t, err := model.ParseDocumentType(typeStr)
-				if err != nil {
-					return err
-				}
-				f.Type = &t
-			}
-			docs, err := s.ListDocuments(f)
+			docs, err := c.ListDocuments(context.Background(), repo, typeStr)
 			if err != nil {
 				return err
 			}
@@ -486,28 +421,24 @@ func docShowCmd() *cobra.Command {
 			if raw && metadata {
 				return fmt.Errorf("--raw and --metadata are mutually exclusive")
 			}
-			s, err := openStore()
+			c, err := openClient()
 			if err != nil {
 				return err
 			}
-			defer s.Close()
-			repo, err := resolveRepo(s)
+			defer c.Close()
+			repo, err := resolveRepoC(c)
 			if err != nil {
 				return err
 			}
-			d, err := s.GetDocumentByFilename(repo.ID, args[0], !metadata)
+			view, err := c.ShowDocument(context.Background(), repo, args[0], !metadata)
 			if err != nil {
 				return err
 			}
 			if raw {
-				_, err := os.Stdout.WriteString(d.Content)
+				_, err := os.Stdout.WriteString(view.Document.Content)
 				return err
 			}
-			links, err := s.ListDocumentLinks(d.ID)
-			if err != nil {
-				return err
-			}
-			return emit(&docView{Document: d, Links: links})
+			return emit(&docView{Document: view.Document, Links: view.Links})
 		},
 	}
 	cmd.Flags().BoolVar(&raw, "raw", false, "write content to stdout with no metadata (ignores --output)")
@@ -541,18 +472,14 @@ func docEditCmd() *cobra.Command {
 					return fmt.Errorf("filename is required")
 				}
 				var (
-					newType    *model.DocumentType
+					newType    *string
 					newContent *string
 				)
 				if _, ok := present["type"]; ok {
 					if in.Type == nil || *in.Type == "" {
 						return fmt.Errorf("type cannot be empty or null; omit the field to leave it unchanged")
 					}
-					t, err := model.ParseDocumentType(*in.Type)
-					if err != nil {
-						return err
-					}
-					newType = &t
+					newType = in.Type
 				}
 				if _, ok := present["content"]; ok {
 					body := ""
@@ -570,15 +497,11 @@ func docEditCmd() *cobra.Command {
 				return fmt.Errorf("requires <filename> positional or --json")
 			}
 			var (
-				newType    *model.DocumentType
+				newType    *string
 				newContent *string
 			)
 			if typeStr != "" {
-				t, err := model.ParseDocumentType(typeStr)
-				if err != nil {
-					return err
-				}
-				newType = &t
+				newType = &typeStr
 			}
 			if content != "" || contentFile != "" {
 				body, err := readLongText(content, contentFile, true, "content")
@@ -600,49 +523,26 @@ func docEditCmd() *cobra.Command {
 	return cmd
 }
 
-func applyDocEdit(filename string, newType *model.DocumentType, newContent *string) error {
+func applyDocEdit(filename string, newType *string, newContent *string) error {
 	if newType == nil && newContent == nil {
 		return fmt.Errorf("nothing to update; pass type and/or content")
 	}
-	s, err := openStore()
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	repo, err := resolveRepo(s)
+	defer c.Close()
+	repo, err := resolveRepoC(c)
 	if err != nil {
 		return err
 	}
-	d, err := s.GetDocumentByFilename(repo.ID, filename, false)
+	updated, err := c.EditDocument(context.Background(), repo, filename, newType, newContent, opts.dryRun)
 	if err != nil {
 		return err
 	}
 	if opts.dryRun {
-		projected := *d
-		if newType != nil {
-			projected.Type = *newType
-		}
-		if newContent != nil {
-			projected.SizeBytes = int64(len(*newContent))
-		}
-		return emitDryRun(&projected)
+		return emitDryRun(updated)
 	}
-	if err := s.UpdateDocument(d.ID, newType, newContent, nil); err != nil {
-		return err
-	}
-	updated, err := s.GetDocumentByID(d.ID, false)
-	if err != nil {
-		return err
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
-		Op: "document.update", Kind: "document",
-		TargetID: &updated.ID, TargetLabel: updated.Filename,
-		Details: updatedFieldList(map[string]bool{
-			"type":    newType != nil,
-			"content": newContent != nil,
-		}),
-	})
 	return emit(updated)
 }
 
@@ -693,52 +593,22 @@ func renameDocument(oldArg, newArg, typeStr string) error {
 	if oldName == newName && typeStr == "" {
 		return fmt.Errorf("nothing to rename: old and new filenames are identical")
 	}
-	var newType *model.DocumentType
-	if typeStr != "" {
-		t, err := model.ParseDocumentType(typeStr)
-		if err != nil {
-			return err
-		}
-		newType = &t
-	}
-	s, err := openStore()
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	repo, err := resolveRepo(s)
+	defer c.Close()
+	repo, err := resolveRepoC(c)
 	if err != nil {
 		return err
 	}
-	d, err := s.GetDocumentByFilename(repo.ID, oldName, false)
+	updated, err := c.RenameDocument(context.Background(), repo, oldName, newName, typeStr, opts.dryRun)
 	if err != nil {
 		return err
 	}
 	if opts.dryRun {
-		projected := *d
-		projected.Filename = newName
-		if newType != nil {
-			projected.Type = *newType
-		}
-		return emitDryRun(&projected)
+		return emitDryRun(updated)
 	}
-	if err := s.RenameDocument(d.ID, newName, newType); err != nil {
-		return err
-	}
-	updated, err := s.GetDocumentByID(d.ID, false)
-	if err != nil {
-		return err
-	}
-	details := fmt.Sprintf("%s → %s", oldName, newName)
-	if newType != nil {
-		details += " type=" + string(*newType)
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
-		Op: "document.rename", Kind: "document",
-		TargetID: &updated.ID, TargetLabel: updated.Filename,
-		Details: details,
-	})
 	if opts.output == outputJSON {
 		return emit(updated)
 	}
@@ -753,13 +623,16 @@ func docExportCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "export [filename]",
-		Short: "Write a document's content to disk",
+		Short: "Write a document's content to disk (local mode only)",
 		Long: `Write a document's content to disk.
 
 Pass --to-path to use the source path the doc was imported from
 (via --from-path on add/upsert), or --to <path> to write to an
 explicit path. Parent directories are created as needed and an
-existing file at the destination is overwritten.`,
+existing file at the destination is overwritten.
+
+Local-only: the API can't write to the client's filesystem. In remote
+mode, use ` + "`mk doc download`" + ` and pipe to disk yourself.`,
 		Args: cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := readJSONInput(rawInput)
@@ -783,6 +656,9 @@ existing file at the destination is overwritten.`,
 				if !in.ToPath && in.To == "" {
 					return fmt.Errorf("provide to (path) or to_path=true (use stored source_path)")
 				}
+				if inRemoteMode() {
+					return fmt.Errorf("mk doc export is not supported in remote mode (writes to the client's filesystem); use `mk doc download` and pipe to disk yourself")
+				}
 				return exportDocument(in.Filename, in.To, in.ToPath)
 			}
 			if len(args) != 1 {
@@ -794,6 +670,9 @@ existing file at the destination is overwritten.`,
 			if !toPath && explicitTo == "" {
 				return fmt.Errorf("provide --to-path (use stored source_path) or --to <path>")
 			}
+			if inRemoteMode() {
+				return fmt.Errorf("mk doc export is not supported in remote mode (writes to the client's filesystem); use `mk doc download` and pipe to disk yourself")
+			}
 			return exportDocument(args[0], explicitTo, toPath)
 		},
 	}
@@ -804,16 +683,16 @@ existing file at the destination is overwritten.`,
 }
 
 func exportDocument(filename, explicitTo string, toPath bool) error {
-	s, err := openStore()
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	repo, err := resolveRepo(s)
+	defer c.Close()
+	repo, err := resolveRepoC(c)
 	if err != nil {
 		return err
 	}
-	d, err := s.GetDocumentByFilename(repo.ID, filename, true)
+	d, err := c.GetDocumentRaw(context.Background(), repo, filename)
 	if err != nil {
 		return err
 	}
@@ -860,6 +739,52 @@ type docExportPreview struct {
 	Bytes       int    `json:"bytes"`
 }
 
+// docDownloadCmd is the remote-friendly counterpart to `mk doc export`.
+// It fetches the document body and writes it to stdout (or `--to <path>`
+// when the caller wants it on disk). Read-only — no audit row, no
+// dry-run.
+func docDownloadCmd() *cobra.Command {
+	var to string
+	cmd := &cobra.Command{
+		Use:   "download <filename>",
+		Short: "Fetch a document's body (writes to stdout or --to <path>)",
+		Long: `Read-only fetch of a document's body. By default writes to stdout
+so the caller can pipe to disk; pass --to <path> to write directly to
+a file (parent directories created as needed).
+
+Works in both local and remote mode. Unlike ` + "`mk doc export`" + `,
+this verb does not require the doc to have a stored source_path and
+makes no assumptions about the developer's working tree — it's just
+"give me the bytes".`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			repo, err := resolveRepoC(c)
+			if err != nil {
+				return err
+			}
+			body, err := c.DownloadDocument(context.Background(), repo, args[0])
+			if err != nil {
+				return err
+			}
+			if to == "" {
+				_, err := os.Stdout.Write(body)
+				return err
+			}
+			if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+				return err
+			}
+			return os.WriteFile(to, body, 0o644)
+		},
+	}
+	cmd.Flags().StringVar(&to, "to", "", "write to this path instead of stdout")
+	return cmd
+}
+
 func docRmCmd() *cobra.Command {
 	var rawInput string
 	cmd := &cobra.Command{
@@ -895,40 +820,27 @@ func docRmCmd() *cobra.Command {
 }
 
 func removeDocument(filename string) error {
-	s, err := openStore()
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	repo, err := resolveRepo(s)
+	defer c.Close()
+	repo, err := resolveRepoC(c)
 	if err != nil {
 		return err
 	}
-	d, err := s.GetDocumentByFilename(repo.ID, filename, false)
+	deleted, preview, err := c.DeleteDocument(context.Background(), repo, filename, opts.dryRun)
 	if err != nil {
 		return err
 	}
 	if opts.dryRun {
-		links, err := s.ListDocumentLinks(d.ID)
-		if err != nil {
-			return err
-		}
 		return emitDryRun(&docDeletePreview{
-			Document:    d,
-			WouldDelete: true,
-			LinksRemoved: len(links),
+			Document:     preview.Document,
+			WouldDelete:  preview.WouldDelete,
+			LinksRemoved: preview.Cascade.IssueLinks + preview.Cascade.FeatureLinks,
 		})
 	}
-	if err := s.DeleteDocument(d.ID); err != nil {
-		return err
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
-		Op: "document.delete", Kind: "document",
-		TargetID: &d.ID, TargetLabel: d.Filename,
-		Details: "type=" + string(d.Type),
-	})
-	return ok("deleted document %s", d.Filename)
+	return ok("deleted document %s", deleted.Filename)
 }
 
 func docLinkCmd() *cobra.Command {
@@ -953,16 +865,12 @@ func docLinkCmd() *cobra.Command {
 				if in.Filename == "" {
 					return fmt.Errorf("filename is required")
 				}
-				ref, err := docLinkTargetFromJSON(in.IssueKey, in.FeatureSlug)
-				if err != nil {
-					return err
-				}
-				return linkDocument(in.Filename, ref, in.Description)
+				return linkDocumentJSON(*in)
 			}
 			if len(args) != 2 {
 				return fmt.Errorf("requires <filename> <ISSUE-KEY|feature-slug> positionals or --json")
 			}
-			return linkDocument(args[0], args[1], why)
+			return linkDocumentArgs(args[0], args[1], why)
 		},
 	}
 	cmd.Flags().StringVar(&why, "why", "", "description of why this document is linked (optional)")
@@ -970,50 +878,34 @@ func docLinkCmd() *cobra.Command {
 	return cmd
 }
 
-func linkDocument(filename, ref, why string) error {
-	s, err := openStore()
+func linkDocumentJSON(in inputs.DocLinkInput) error {
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	repo, err := resolveRepo(s)
+	defer c.Close()
+	repo, err := resolveRepoC(c)
 	if err != nil {
 		return err
 	}
-	d, err := s.GetDocumentByFilename(repo.ID, filename, false)
-	if err != nil {
-		return err
-	}
-	target, err := resolveDocLinkTarget(s, repo.ID, ref)
+	link, err := c.LinkDocument(context.Background(), repo, in, opts.dryRun)
 	if err != nil {
 		return err
 	}
 	if opts.dryRun {
-		preview := &model.DocumentLink{
-			DocumentID:       d.ID,
-			DocumentFilename: d.Filename,
-			DocumentType:     d.Type,
-			Description:      strings.TrimSpace(why),
-		}
-		if target.IssueID != nil {
-			preview.IssueID = target.IssueID
-		}
-		if target.FeatureID != nil {
-			preview.FeatureID = target.FeatureID
-		}
-		return emitDryRun(preview)
+		return emitDryRun(link)
 	}
-	link, err := s.LinkDocument(d.ID, target, strings.TrimSpace(why))
-	if err != nil {
-		return err
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
-		Op: "document.link", Kind: "document",
-		TargetID: &d.ID, TargetLabel: d.Filename,
-		Details: "→ " + ref,
-	})
 	return emit(link)
+}
+
+func linkDocumentArgs(filename, ref, why string) error {
+	in := inputs.DocLinkInput{Filename: filename, Description: strings.TrimSpace(why)}
+	if isIssueKey(strings.TrimSpace(ref)) {
+		in.IssueKey = strings.TrimSpace(ref)
+	} else {
+		in.FeatureSlug = strings.TrimSpace(ref)
+	}
+	return linkDocumentJSON(in)
 }
 
 func docUnlinkCmd() *cobra.Command {
@@ -1038,77 +930,50 @@ func docUnlinkCmd() *cobra.Command {
 				if in.Filename == "" {
 					return fmt.Errorf("filename is required")
 				}
-				ref, err := docLinkTargetFromJSON(in.IssueKey, in.FeatureSlug)
-				if err != nil {
-					return err
-				}
-				return unlinkDocument(in.Filename, ref)
+				return unlinkDocumentJSON(*in)
 			}
 			if len(args) != 2 {
 				return fmt.Errorf("requires <filename> <ISSUE-KEY|feature-slug> positionals or --json")
 			}
-			return unlinkDocument(args[0], args[1])
+			in := inputs.DocUnlinkInput{Filename: args[0]}
+			if isIssueKey(strings.TrimSpace(args[1])) {
+				in.IssueKey = strings.TrimSpace(args[1])
+			} else {
+				in.FeatureSlug = strings.TrimSpace(args[1])
+			}
+			return unlinkDocumentJSON(in)
 		},
 	}
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }
 
-func unlinkDocument(filename, ref string) error {
-	s, err := openStore()
+func unlinkDocumentJSON(in inputs.DocUnlinkInput) error {
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	repo, err := resolveRepo(s)
+	defer c.Close()
+	repo, err := resolveRepoC(c)
 	if err != nil {
 		return err
 	}
-	d, err := s.GetDocumentByFilename(repo.ID, filename, false)
+	preview, _, err := c.UnlinkDocument(context.Background(), repo, in, opts.dryRun)
 	if err != nil {
 		return err
 	}
-	target, err := resolveDocLinkTarget(s, repo.ID, ref)
-	if err != nil {
-		return err
+	target := in.IssueKey
+	if target == "" {
+		target = "feature/" + in.FeatureSlug
 	}
 	if opts.dryRun {
-		links, err := s.ListDocumentLinks(d.ID)
-		if err != nil {
-			return err
-		}
-		matched := 0
-		for _, l := range links {
-			if target.IssueID != nil && l.IssueID != nil && *l.IssueID == *target.IssueID {
-				matched++
-			}
-			if target.FeatureID != nil && l.FeatureID != nil && *l.FeatureID == *target.FeatureID {
-				matched++
-			}
-		}
-		if matched == 0 {
-			return fmt.Errorf("no link from %s to %s", d.Filename, ref)
-		}
 		return emitDryRun(&docUnlinkPreview{
-			Filename:    d.Filename,
-			Target:      ref,
-			WouldRemove: matched,
+			Filename:    preview.Filename,
+			Target:      preview.Target,
+			WouldRemove: preview.WouldRemove,
 		})
 	}
-	n, err := s.UnlinkDocument(d.ID, target)
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return fmt.Errorf("no link from %s to %s", d.Filename, ref)
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
-		Op: "document.unlink", Kind: "document",
-		TargetID: &d.ID, TargetLabel: d.Filename,
-		Details: "↛ " + ref,
-	})
-	return ok("unlinked %s from %s", d.Filename, ref)
+	return ok("unlinked %s from %s", in.Filename, target)
 }
 
 // docDeletePreview is the dry-run payload for `mk doc rm`. LinksRemoved
@@ -1125,42 +990,4 @@ type docUnlinkPreview struct {
 	Filename    string `json:"filename"`
 	Target      string `json:"target"`
 	WouldRemove int    `json:"would_remove"`
-}
-
-// docLinkTargetFromJSON converts a JSON link payload's (issue_key,
-// feature_slug) pair into the single-string reference resolveDocLinkTarget
-// expects. Exactly one must be set; the JSON path doesn't accept the
-// "shape-discriminated string" the CLI positional uses.
-func docLinkTargetFromJSON(issueKey, featureSlug string) (string, error) {
-	switch {
-	case issueKey != "" && featureSlug != "":
-		return "", fmt.Errorf("provide issue_key OR feature_slug, not both")
-	case issueKey != "":
-		if !isIssueKey(strings.TrimSpace(issueKey)) {
-			return "", fmt.Errorf("issue_key %q must be canonical (e.g. \"MINI-42\")", issueKey)
-		}
-		return strings.TrimSpace(issueKey), nil
-	case featureSlug != "":
-		return strings.TrimSpace(featureSlug), nil
-	default:
-		return "", fmt.Errorf("issue_key or feature_slug is required")
-	}
-}
-
-// resolveDocLinkTarget interprets the second positional arg as either an
-// issue key (e.g. MINI-42) or a feature slug in the given repo.
-func resolveDocLinkTarget(s *store.Store, repoID int64, ref string) (store.LinkTarget, error) {
-	ref = strings.TrimSpace(ref)
-	if isIssueKey(ref) {
-		iss, err := resolveIssueByKey(s, ref)
-		if err != nil {
-			return store.LinkTarget{}, err
-		}
-		return store.LinkTarget{IssueID: &iss.ID}, nil
-	}
-	feat, err := s.GetFeatureBySlug(repoID, ref)
-	if err != nil {
-		return store.LinkTarget{}, fmt.Errorf("%q is not an issue key or feature slug in this repo", ref)
-	}
-	return store.LinkTarget{FeatureID: &feat.ID}, nil
 }
