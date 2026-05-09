@@ -19,6 +19,9 @@ func newInstallSkillCmd() *cobra.Command {
 the directory if needed. Overwrites any existing copy with the version
 embedded in this build of mk so re-running picks up doc updates.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if inRemoteMode() {
+				return fmt.Errorf("mk install-skill: not supported in remote mode (writes the skill file to the local repo); run this verb against the local DB instead")
+			}
 			cwd, err := os.Getwd()
 			if err != nil {
 				return err
