@@ -112,4 +112,11 @@ var (
 		Filename: "auth-design.md",
 		To:       "docs/auth-design.md",
 	}
+
+	ExampleRepoCreate = RepoCreateInput{
+		Prefix:    "MINI",
+		Name:      "mini-kanban",
+		Path:      "/Users/dev/code/mini-kanban",
+		RemoteURL: "https://github.com/example/mini-kanban.git",
+	}
 )
