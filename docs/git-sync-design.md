@@ -68,17 +68,16 @@ repos/
                                  # tags, relations, prs, created_at, updated_at
         description.md
         comments/
-          2026-05-09T14-22-00Z--<uuid8>.yaml
-          2026-05-09T14-22-00Z--<uuid8>.md
+          2026-05-09T14-22-00Z--<full-uuid>.yaml
+          2026-05-09T14-22-00Z--<full-uuid>.md
     features/
       auth-rewrite/
         feature.yaml             # uuid, slug, title, timestamps
         description.md
     docs/
-      architecture/
-        overview/
-          doc.yaml               # uuid, type, source_path, links[], timestamps
-          content.md
+      auth-overview/             # folder named by filename (no type in path)
+        doc.yaml                 # uuid, filename, type, source_path, links[], timestamps
+        content.md
 ```
 
 Notes on the layout:
@@ -95,9 +94,17 @@ Notes on the layout:
   produce a real conflict on the filename. Timestamp + short uuid suffix
   makes concurrent appends collision-free at the filesystem layer. We lose
   the friendly numbering — worth it for the merge ergonomics.
-- **`redirects.yaml` is per-repo.** It records every label rename and
-  every collision-driven renumber, so old references (in PR descriptions,
-  Slack, etc.) can still resolve via `mk issue show MINI-7`.
+- **Doc folders are named by `filename`, not `type`.** `type` is mutable
+  via `mk doc edit --type` and is not part of the schema's unique key
+  (`UNIQUE(repo_id, filename)`). Putting it in the path would turn a
+  type-change into a folder move and would forbid two docs sharing a
+  filename across types. `type` lives inside `doc.yaml`.
+- **`redirects.yaml` is per-repo and covers all renamable kinds.** It
+  records every label rename and every collision-driven renumber/rename
+  for issues, features, *and* documents (each entry carries a `kind`
+  discriminator), so old references can still resolve via
+  `mk issue show MINI-7`, `mk feature show old-slug`,
+  `mk doc show old-filename.md`.
 
 ## Sync repo identity and mode switching
 
@@ -207,12 +214,16 @@ Approximate shape, not a finalised schema:
 uuid: 0190c2a3-7f3a-7b2c-8b21-...   # UUIDv7, immutable
 number: 7
 state: in_progress
-assignee: geoff
-feature: auth-rewrite               # slug reference, resolved at import
-tags: [security, p1]
+assignee: "geoff"                    # always quoted (see "YAML emit rules")
+feature:
+  label: auth-rewrite                # readability hint, refreshed on export
+  uuid: 0190c2a3-7f3a-7b2c-8b21-bbbbbbbbbbbb   # canonical
+tags: ["security", "p1"]
 relations:
-  blocks: [MINI-12]                 # label references, resolved at import
-  relates_to: [MINI-3]
+  blocks:
+    - {label: MINI-12, uuid: 0190c2a3-7f3a-7b2c-8b21-cccccccccccc}
+  relates_to:
+    - {label: MINI-3,  uuid: 0190c2a3-7f3a-7b2c-8b21-dddddddddddd}
   duplicate_of: []
 prs:
   - https://github.com/.../pull/42
@@ -253,16 +264,34 @@ Pure-Go libraries are available; no CGO concerns.
 
 ### Cross-references
 
-Cross-references in YAML use **labels** (`blocks: [MINI-7]`), not UUIDs,
-for human readability. They're resolved to uuid at import time. If a
-label is ambiguous because of an unresolved collision, the uuid embedded
-in the colliding `issue.yaml` is the tiebreaker; if a label is missing
-because of a renumber, `redirects.yaml` provides the lookup.
+Cross-references in YAML carry **both label and uuid**:
+
+```yaml
+blocks:
+  - {label: MINI-7, uuid: 0190c2a3-7f3a-7b2c-8b21-...}
+feature:
+  label: auth-rewrite
+  uuid: 0190c2a3-7f3a-7b2c-8b21-...
+```
+
+- **uuid is canonical.** Import resolves references by uuid; the label
+  is purely a human-readability hint. This sidesteps every ordering
+  problem during a renumber pass: an incoming `blocks: [{label: MINI-7,
+  uuid: X}]` reference unambiguously means "the record with uuid X",
+  regardless of what label MINI-7 maps to right now.
+- **The label gets refreshed on export.** If the target's current label
+  has changed (rename, renumber), the next `mk sync export` rewrites
+  the label hint to match. Stale labels on disk are harmless — they're
+  ignored on import.
+- **If the uuid isn't found locally**, the reference is dangling: log a
+  warning, leave the YAML as-is, do not insert a phantom DB row. This
+  can happen when one user receives a reference to a record that
+  another user hasn't pushed yet.
 
 The DB stores foreign keys as integer ids (current behaviour); on export
-we write labels for readability; on import we resolve labels back to uuid
-and then to integer fk. Three layers, but each translation is local and
-mechanical.
+we look up `(integer-fk → uuid + current label)` and write the pair; on
+import we look up `(uuid → integer-fk)` and ignore the label except for
+the export-side refresh logic. The label-as-hint is purely cosmetic.
 
 ### Schema impact
 
@@ -272,8 +301,31 @@ mechanical.
 - `tags`, `issue_relations`, `issue_pull_requests` don't need UUIDs —
   they're either pure values or composite relationships where the natural
   key is fine.
-- `repos` could get a uuid eventually if repo rename becomes a feature,
-  but `prefix` is fine as the stable key for now.
+- `repos` gets a `uuid` too, used by `repo.yaml` so we can detect
+  catastrophic wrong-repo merges (two users with the same prefix
+  pointing at the same sync repo).
+- **Relax `repos.path` UNIQUE.** Today `path` is `NOT NULL UNIQUE`;
+  with whole-repo sync (see [Whole-repo sync](#whole-repo-sync)) we
+  auto-register **phantom repos** for prefixes that exist on disk but
+  have no local working tree on this machine. Those rows store
+  `path = ''`. Replace the column-level UNIQUE with a partial index:
+  `CREATE UNIQUE INDEX uniq_repos_path ON repos(path) WHERE path != '';`
+  so multiple phantoms can coexist while real working trees still get
+  the dedup guarantee.
+
+### What's local-only and never synced
+
+To pre-empt confusion: these `repos` columns are **client-state**, never
+written to or read from `repo.yaml`:
+
+- `repos.id` — autoincrement PK, diverges across machines.
+- `repos.path` — local working tree location.
+- `repos.created_at` — local DB row creation, not the project's true age.
+
+What `repo.yaml` *does* carry: `uuid`, `prefix`, `name`, `remote_url`,
+`next_issue_number` (advisory). The local row's `id` is determined at
+import time by uuid lookup; `path` is whatever the user has locally
+(or `''` for a phantom).
 
 ## Sync algorithm
 
@@ -289,39 +341,66 @@ mechanical.
 ```
 sync_state(
   uuid TEXT PRIMARY KEY,
-  kind TEXT,                  -- 'issue', 'feature', 'document', 'comment'
-  last_synced_at DATETIME,
-  last_synced_hash TEXT,      -- content hash at last sync
-  last_seen_in_files BOOL     -- true if record was on disk last sync
+  kind TEXT,                  -- 'issue' | 'feature' | 'document' | 'comment'
+  last_synced_at DATETIME,    -- last successful export OR import touched this uuid
+  last_synced_hash TEXT       -- content hash at that sync
 )
 ```
 
-This is what makes deletion detection possible. Without it, "record exists
-in DB but not on disk" is ambiguous — could be a remote delete, could be
-local-only-not-yet-exported. With it, we know.
+The **presence of a row** in `sync_state` is the "this record has been
+synced before" flag. Absence means "local-only, never participated in a
+sync". This is what makes deletion detection unambiguous:
+
+| DB row exists? | sync_state row? | uuid seen on disk this import? | Meaning |
+| --- | --- | --- | --- |
+| Yes | No  | No  | New local, awaiting first export. **Leave.** |
+| Yes | Yes | No  | Previously synced, now deleted remotely. **Propagate delete.** |
+| Yes | Yes | Yes | Tracked record, normal compare-and-merge. |
+| No  | No  | Yes | New record from elsewhere. **Insert.** |
+| No  | Yes | Yes | Resurrection: previously deleted locally, came back from remote. **Re-insert.** |
+| No  | Yes | No  | Cleanup: was deleted both sides. **Drop the sync_state row.** |
+
+There is no per-pass boolean (no `last_seen_in_files`). The "did I see
+this uuid on this run?" question is answered by an in-memory set built
+during the import walk; it doesn't need to live in the DB.
 
 ### `mk sync import` (files → DB)
 
-For each record folder under `repos/<prefix>/`:
+Phase 1 — **scan**: walk `repos/<prefix>/` and read every record folder
+into memory. For each: extract uuid, label, `updated_at`, content hash,
+and the raw YAML/markdown payloads. Build:
 
-1. Read uuid, label, `updated_at`, content from YAML + body files.
-2. Look up by **uuid** in DB:
-   - **Not in DB** — new record from elsewhere. Insert.
-   - **In DB, content hash matches** — no-op. Stamp `last_seen_in_files = true`.
-   - **In DB, content differs** — compare `updated_at`. File newer →
-     overwrite DB. DB newer → leave (export will rewrite the file).
-   - **In DB, label differs from file's label** — label rename happened on
-     the git side. Update DB label, append a `redirects.yaml` entry.
-3. Check label collision: does another DB row use this label with a
-   different uuid? If so, that other row is local-only (otherwise git
-   would have flagged a folder conflict). **Renumber it** to
-   `max(number)+1`, add a `redirects.yaml` entry, log a `renumber`
-   audit op.
+- `seen_uuids[kind]` — set of all uuids found on disk this pass.
+- `incoming_labels[kind][label]` — uuid that owns each label on disk.
 
-After walking the disk, scan DB rows whose uuid was *not* seen this pass:
+Phase 2 — **resolve label collisions**: for each kind, find DB rows
+using a label that's also in `incoming_labels` but with a *different*
+uuid. Those DB rows are local-only (otherwise git would have produced
+a folder conflict). Renumber them: allocate `max(number)+1` for issues;
+for features and documents, suffix the slug/filename (e.g., `slug-2`,
+`filename-2.md`). Add an entry to `redirects.yaml` with the kind
+discriminator. Log a `renumber` (or `rename`) audit op.
 
-- `last_seen_in_files = true` previously → deleted in git, propagate the delete.
-- `last_seen_in_files = false` (never synced) → local-only awaiting export. Leave.
+Phase 3 — **apply**: for each scanned record, look up by uuid in DB:
+
+- **Not in DB, no `sync_state` row** — new record from elsewhere. Insert.
+  Cross-references resolve by uuid; any uuid not yet present is dangling
+  and gets recorded but not enforced.
+- **Not in DB, `sync_state` row present** — resurrection. Re-insert.
+- **In DB, content hash matches** — no-op.
+- **In DB, content differs** — compare `updated_at`. File newer →
+  overwrite DB. DB newer → leave (export will rewrite the file).
+- **In DB, label differs** — label rename on the git side. Update DB
+  label; add `redirects.yaml` entry.
+
+After Phase 3, write `sync_state(uuid, kind, last_synced_at = NOW,
+last_synced_hash)` for every uuid touched.
+
+Phase 4 — **detect deletions**: for each DB row with a `sync_state` row
+whose uuid is **not** in `seen_uuids`, propagate the delete. Drop the
+`sync_state` row alongside.
+
+### `mk sync export` (DB → files)
 
 ### `mk sync export` (DB → files)
 
@@ -333,10 +412,14 @@ For each record in DB:
 3. Write content **only if hash differs**. This is what keeps git diffs
    surgical — re-running `mk sync` on an unchanged DB produces zero file
    modifications.
-4. Update `sync_state.last_synced_at` and `last_synced_hash`.
+4. Refresh label hints inside cross-references: any `{label, uuid}` pair
+   pointing at this record gets its `label` field updated to the current
+   value if it's stale. Pure cosmetic on-disk; uuid is canonical.
+5. Upsert `sync_state(uuid, kind, last_synced_at = NOW, last_synced_hash)`.
 
 After writing, walk on-disk folders. Any folder whose uuid is no longer
-in DB is a local deletion — with `--prune` propagate it; otherwise warn.
+in DB is a local deletion — with `--prune` propagate it (and drop the
+matching `sync_state` row); otherwise warn.
 
 ### Order of operations
 
@@ -357,57 +440,150 @@ A single `mk sync` should produce **at most one commit**. Partial failure
 should not leave a half-staged tree — easiest path is to stage everything
 in a temp working area and only `git add` on full success.
 
+`mk sync` should be process-locked: only one `mk sync` runs against a
+given DB at a time, and concurrent `mk issue create` (etc.) calls block
+on a short advisory lock for the duration of the sync. Otherwise an
+in-flight create can allocate a `next_issue_number` that import is
+about to assign to a remote uuid.
+
+### Whole-repo sync
+
+`mk sync` always processes the **entire** sync repo's content, not just
+the prefix matching the current working tree. Selective sync turns out
+to be painful in practice: stale-data-in-working-tree, partial pushes,
+and "I have to remember to sync project B too" ergonomics.
+
+Concretely:
+
+- `git pull` brings in changes for every prefix in the sync repo.
+- `import` walks every `repos/<prefix>/` folder, not just the local
+  project's.
+- `export` walks every locally-known repo, not just the active one.
+- One `mk sync`, one commit (when there's anything to commit), all
+  prefixes covered.
+
+**Phantom repos.** A prefix can exist in the sync repo without a local
+working tree on this machine (because the user only checked out some
+subset of the projects mk tracks). On import, those rows still get
+written to DB — with `path = ''` (see [Schema impact](#schema-impact)
+on the `path` UNIQUE relaxation). They're queryable via `mk` (e.g.,
+`mk issue list -R OTHER` works), but `resolveRepo()` will not pick a
+phantom as "the current repo"; it requires a real working tree path.
+
+Phantom repos are upgraded to real ones automatically the first time
+the user runs `mk` from inside the matching project's working tree:
+`resolveRepo()` finds an existing row by uuid (read from `repo.yaml`),
+populates `path`, and the row stops being phantom.
+
+### Bootstrap and first sync
+
+The first time data flows between a DB and a sync repo is the most
+dangerous moment for the algorithm — naïvely applying the regular
+`import → renumber-on-collision → export` flow can silently shift a
+collaborator's entire issue stream. Bootstrap is therefore split into
+two non-overlapping commands.
+
+**`mk sync init <local-path> [--remote <git-url>]`** — export-only.
+
+- Runs from inside a project repo.
+- Creates the sync repo at `<local-path>` if it doesn't exist
+  (initialises `mk-sync.yaml`, sets remote if `--remote` given).
+- **Refuses to proceed if the remote already has any data.** Bootstrap
+  via `init` is for "I'm setting up sync for the first time and the
+  remote is empty"; everything else uses `clone`.
+- Writes `.mk/config.yaml` in the project repo with the remote URL.
+- Performs an initial `export` of the project's data, commits, pushes.
+
+**`mk sync clone [<local-path>]`** — import-only with explicit handling
+for pre-existing local data.
+
+- Runs from inside a project repo (reads `.mk/config.yaml` for the
+  remote URL).
+- Clones the sync repo to `<local-path>` (or a default).
+- Records `(remote → local path)` in DB.
+- **If local DB has any rows for this prefix:** refuses to proceed
+  unless `--allow-renumber` is passed. With `--allow-renumber`, prints
+  a preview ("the following local issues will be renumbered: …")
+  before applying. Without `--allow-renumber`, exits with an error
+  pointing at the preview command.
+- If local DB is empty for this prefix, imports normally.
+
+**`mk sync clone --dry-run`** prints the preview unconditionally — what
+would be imported, what would be renumbered — without touching DB or
+disk.
+
+These two commands are the only entry points where collisions on
+"first contact" need special framing; once a project has both a DB
+and a synced state, normal `mk sync` is the steady-state path and
+its collision policy is the regular `already-in-git wins` rule.
+
 ### Collision policy in detail
 
-When import finds the same label used by two different uuids:
+The same rule applies across all renamable kinds — issues, features,
+documents — wherever a label is used as the folder name:
 
 - The uuid present in the **just-imported file** keeps the label. It's
   already in git history; rewriting it would surprise everyone who's
   pulled.
-- The uuid present **only in DB** (no file on disk yet) is renumbered to
-  `max(number) + 1` for the repo.
-- A `redirects.yaml` entry records the move:
+- The uuid present **only in DB** (no file on disk yet) is given a new
+  label deterministically:
+  - **Issues:** renumber to `max(number) + 1` for the repo.
+  - **Features:** suffix the slug — `auth-rewrite` → `auth-rewrite-2`,
+    incrementing until unique.
+  - **Documents:** suffix the filename — `auth-overview.md` →
+    `auth-overview-2.md`, incrementing until unique.
+- A `redirects.yaml` entry records the move, with a `kind` discriminator:
 
 ```yaml
-- old: MINI-7
+- kind: issue
+  old: MINI-7
   new: MINI-12
   uuid: 0190c2a3-...
-  renumbered_at: 2026-05-09T14:30:00Z
+  changed_at: 2026-05-09T14:30:00Z
   reason: label_collision
+
+- kind: document
+  old: auth-overview.md
+  new: auth-overview-2.md
+  uuid: 0190c2a3-...
+  changed_at: 2026-05-09T14:30:00Z
+  reason: label_collision
+
+- kind: feature
+  old: auth-rewrite
+  new: auth-rewrite-2
+  uuid: 0190c2a3-...
+  changed_at: 2026-05-09T14:30:00Z
+  reason: label_rename
 ```
 
-- The next `mk sync export` writes out the renumbered folder.
+- The next `mk sync export` writes out the renumbered/renamed folder.
 
 This rule is what makes the algorithm **consistent across machines**:
 every client running `import` against the same git state arrives at the
-same renumbering. "Already-in-git wins" is a deterministic, observable
-state, unlike "earlier `created_at` wins" which depends on details neither
-client can verify.
+same outcome. "Already-in-git wins" is a deterministic, observable
+state, unlike "earlier `created_at` wins" which depends on details
+neither client can verify.
 
-### What references get rewritten on renumber?
+### What references get rewritten on renumber/rename?
 
-Mechanical:
+With label+uuid cross-references, the answer is largely **nothing has
+to be rewritten for correctness**. Imports resolve by uuid; stale
+`label` hints are ignored. Two practical points:
 
-- The folder name itself.
-- The `number` field in `issue.yaml`.
-- `relates_to` / `blocks` / `duplicate_of` lists in *other* `issue.yaml`
-  files that pointed at the loser. (Lists are label refs; the import
-  pass resolves through `redirects.yaml`, so technically these don't
-  need to be rewritten in place — old labels still resolve. We can
-  rewrite opportunistically on next export to keep the on-disk state
-  tidy, but it's not required for correctness.)
-- `document_links` references.
-
-Not rewritten:
-
-- Free-text mentions of the old label inside markdown bodies (`description.md`,
-  comment bodies). Regex-replacing `\bMINI-7\b` is tempting but unsafe — a
-  comment might be quoting an old discussion of the original MINI-7. Emit
-  a warning listing every body that contains the renumbered token; humans
-  can decide.
-- External references (commit messages, PR descriptions, Slack). Out of
-  reach. The `redirects.yaml` entry plus `mk issue show MINI-7` resolving
-  via redirect is what makes these tolerable.
+- **Refresh on export, not on import.** The next `mk sync export` walks
+  cross-references for any record that touched DB this run and refreshes
+  the `label` field of each `{label, uuid}` pair to match the current
+  label of the target uuid. This keeps the on-disk view tidy without
+  introducing a "rewrite the whole tree on every renumber" pass.
+- **Free-text mentions of the old label** inside markdown bodies
+  (`description.md`, comment bodies) are not rewritten. Regex-replacing
+  `\bMINI-7\b` is tempting but unsafe — a comment might be quoting an
+  old discussion of the original MINI-7. Emit a warning listing every
+  body that contains the renumbered token; humans can decide.
+- **External references** (commit messages, PR descriptions, Slack) are
+  out of reach. `redirects.yaml` plus `mk issue show MINI-7` resolving
+  via the redirect chain is what makes these tolerable.
 
 ### `next_issue_number` becomes advisory
 
@@ -462,11 +638,73 @@ idempotent against a clean DB.
 
 If two machines initialise mk repos with the same prefix (`MINI`) for
 two unrelated working trees, and both push to the same git sync repo,
-their data merges into the same `repos/MINI/` folder and chaos ensues.
-Mitigation: `repo.yaml` stores the original mk DB's uuid for the repo
-itself (this is the one place we'd use a uuid for `repos`), and import
-refuses to merge a folder whose `repo.yaml` uuid doesn't match the
-local DB's. User has to either delete one side or rename the prefix.
+their data would merge into the same `repos/MINI/` folder and chaos
+would ensue. Mitigation: `repo.yaml` carries the repo's own uuid, and
+import refuses to merge a folder whose `repo.yaml` uuid doesn't match
+the local DB's. User has to either delete one side or rename the prefix.
+
+### Case-insensitive filesystems
+
+macOS (APFS, HFS+ default) and Windows (NTFS default) are
+case-insensitive. Document filenames allow any UTF-8 except `/\NUL` and
+control chars (`ValidateDocFilenameStrict`), so `auth-overview.md` and
+`Auth-Overview.md` are different DB rows but the same folder on those
+filesystems. The import path must canonicalise:
+
+- **NFC normalise** every disk-derived label and DB-side label before
+  comparison (avoids precomposed vs. decomposed Unicode forms).
+- **Detect case-insensitive collisions on import** between distinct
+  uuids and refuse to merge them silently. Treat as a label-collision
+  case (loser gets renamed via the standard mechanism).
+
+Same applies to feature slugs in principle, though the validator
+already constrains them to lowercase kebab-case so case collisions are
+unlikely.
+
+### YAML emit rules
+
+`assignee` and `name` are free-form strings; values like `assignee: on`
+or `assignee: no` round-trip through YAML 1.1 as booleans. Tag values
+similarly. The emit path must:
+
+- **Always quote user-supplied scalar strings** in YAML output
+  (`assignee: "geoff"` rather than `assignee: geoff`). This is cheap
+  and removes an entire class of round-trip surprises.
+- **Refuse to import a value whose YAML-decoded type doesn't match the
+  schema's expected type** for that field. e.g., if `assignee` decodes
+  to a bool, fail loudly rather than coercing.
+
+### Concurrent `mk sync` invocations across machines
+
+Two clients run `mk sync` against the same remote at the same time.
+Both compute renumbers from their local view, both push. The first
+push wins; the second gets a `non-fast-forward` rejection. The losing
+client must `git pull`, which surfaces conflicts (or merges cleanly),
+then re-run `mk sync import` to re-resolve and re-export. The
+"one commit per `mk sync`" promise holds within a single invocation;
+across two contended invocations it becomes "one commit per successful
+sync, possibly preceded by a re-run". Documenting this so users aren't
+surprised when a contended sync needs a retry.
+
+### Half-synced state from a crash
+
+If `mk sync` crashes mid-export (some files written, others not), the
+working tree may be in a state that doesn't reflect any consistent DB
+snapshot. Mitigation: stage the export in a scratch area and only swap
+into the working tree atomically when the full export is computed. Worst
+case: re-running `mk sync` recovers, since import-then-export is
+idempotent against a clean DB.
+
+### Threat model: hand-edited working tree
+
+`mk sync` treats files-newer-than-DB as authoritative. That means a
+user (or anything with FS write access) can hand-edit `issue.yaml`
+between sync runs and `mk sync import` will accept the edit as truth.
+This is by design — it's how a user could fix a YAML conflict by
+hand — but it means the sync repo working tree is **not** a tamper-proof
+log. Anyone who can write the working tree can rewrite history (in the
+sense of "future state of the DB"). Combine with normal git protections
+on the remote.
 
 ## Out of scope (deliberately)
 
@@ -506,44 +744,61 @@ local DB's. User has to either delete one side or rename the prefix.
 2. **Should `mk init` set up the sync repo path?** Or is it a separate
    `mk sync init` step? The latter keeps `mk init` lightweight and lets
    sync be opt-in. Strong lean towards keeping them separate.
-3. **Comment filename scheme: timestamp + uuid8, or just uuid7?** UUIDv7
-   already encodes the timestamp, so `uuidv7.yaml` would be self-sorting
-   and shorter. Tradeoff: less human-readable. The timestamp prefix
-   is a usability vs. compactness call.
+3. **Comment filename scheme: `<timestamp>--<uuid>.yaml` vs `<uuid>.yaml` only.**
+   UUIDv7 already encodes the timestamp, so the prefix is redundant for
+   ordering — but the human-readable date in the filename is a real
+   usability win (`ls comments/` is meaningful at a glance). Lean
+   towards keeping the timestamp prefix even though it's technically
+   duplicated information.
 4. **Should `redirects.yaml` ever be pruned?** Redirect entries
    accumulate forever. After N years, very old redirects may not be
    worth resolving. Probably never prune in v1; revisit if it becomes
    a problem.
 5. **What command surface for the audit op?** `mk sync` writes a
-   `history` row of op `sync` per run, plus per-renumber `renumber` ops.
-   Per the existing pattern in `internal/cli/audit.go`, this is one
-   `recordOp` call per logical action.
-6. **What goes in `mk-sync.yaml` beyond schema version?** Could carry an
-   advisory list of expected prefixes, the originating mk version, or a
-   uuid of the sync repo itself (handy for ruling out catastrophic
-   wrong-repo mistakes). v1 can ship with just `schema_version` and
-   `created_at` and grow from there.
+   `history` row of op `sync` per run, plus per-renumber/rename
+   sub-ops. Per the existing pattern in `internal/cli/audit.go`, this
+   is one `recordOp` call per logical action.
+6. **What goes in `mk-sync.yaml` beyond `schema_version` and `created_at`?**
+   Probably nothing in v1. Candidates for later: advisory list of
+   expected prefixes, originating mk version. The repo's own uuid
+   already lives in `repo.yaml` per prefix.
+7. **Phantom-repo lifecycle.** When the user runs `mk` from inside a
+   project working tree whose prefix is a phantom in DB, do we:
+   (a) auto-upgrade the phantom by populating `path`,
+   (b) prompt the user, or
+   (c) require an explicit `mk sync attach` command?
+   Option (a) is the principle-of-least-surprise default but means a
+   `cd` into a project's directory silently mutates DB state. Probably
+   fine, but worth deciding before shipping.
 
 ## Implementation phasing
 
 The work is naturally staged. Each step is independently shippable.
 
-1. **Add `uuid` columns + backfill migration.** No sync yet. Just makes
-   identity stable for future work, and starts populating UUIDs on every
-   new record. Low risk, no user-visible change.
+1. **Add `uuid` columns + backfill migration.** Issues, features,
+   documents, comments, repos all get a UUIDv7 column. Generated at
+   create time, never mutated. `migrate()` backfills existing rows.
+   Relax `repos.path` UNIQUE to a partial index so phantoms can exist
+   later. Low risk, no user-visible change.
 2. **Build `mk sync export`.** One-way DB → files. Useful immediately as
-   a backup / inspection tool, even with no import.
+   a backup / inspection tool, even with no import. Establishes the
+   YAML emit rules (always quote user strings) and the
+   write-only-if-hash-differs discipline.
 3. **Build `mk sync import`.** One-way files → DB. Exercises the
-   collision detection and label-resolution paths.
+   `sync_state` state machine, label-collision resolution across all
+   three kinds (issues, features, documents), and the phantom-repo
+   creation path. Adds `redirects.yaml` plumbing.
 4. **Wire them together as `mk sync`,** with the pull / commit / push
-   shell. Add `redirects.yaml` plumbing. This is also where the sentinel
-   detection (`mk-sync.yaml`) and project-side `.mk/config.yaml` reverse
-   pointer land, plus the `mk sync init` / `mk sync clone` bootstrap
-   commands.
+   shell, the process lock, and the whole-repo (multi-prefix)
+   walking. Sentinel detection (`mk-sync.yaml`) and project-side
+   `.mk/config.yaml` reverse pointer land here, plus the
+   `mk sync init` / `mk sync clone` bootstrap commands with their
+   `--allow-renumber` / `--dry-run` flags.
 5. **Comment filename scheme + timestamps.** Could land in step 2 or 3,
    but easier to validate the layout against real data first.
 6. **Documentation pass.** Update `SKILL.md` so AI agents know how to
-   drive `mk sync` and what to expect on collision.
+   drive `mk sync`, what `mk sync init` vs. `mk sync clone` mean, and
+   what to expect on collision.
 
 Steps 1 and 2 can be merged independently. Steps 3 and 4 are tightly
 coupled and probably want to land together.
