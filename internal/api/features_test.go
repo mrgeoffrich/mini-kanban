@@ -6,6 +6,7 @@ import (
 
 	"github.com/mrgeoffrich/mini-kanban/internal/api"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
 
 func TestFeaturesListEmpty(t *testing.T) {
@@ -362,6 +363,60 @@ func TestFeatureEditNotFound(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)
 	resp, _ := apiPatch(t, ts.URL+"/repos/MINI/features/nope", `{"title":"x"}`)
+	if resp.StatusCode != 404 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestFeatureDeleteHappy(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedFeature(t, s, repo, "auth", "Captured Title")
+	resp, body := apiDelete(t, ts.URL+"/repos/MINI/features/auth", nil)
+	if resp.StatusCode != 204 {
+		t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+	}
+	if len(body) != 0 {
+		t.Fatalf("body should be empty: %q", body)
+	}
+	assertHistoryOps(t, s, []string{"feature.delete"})
+	rows, _ := s.ListHistory(store.HistoryFilter{OldestFirst: true})
+	if rows[0].Details != "Captured Title" {
+		t.Fatalf("audit details: %q", rows[0].Details)
+	}
+}
+
+func TestFeatureDeleteDryRunCascade(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	feat := seedFeature(t, s, repo, "auth", "Auth")
+	if _, err := s.CreateIssue(repo.ID, &feat.ID, "child", "", model.StateBacklog, nil); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	resp, body := apiDelete(t, ts.URL+"/repos/MINI/features/auth?dry_run=true", nil)
+	if resp.StatusCode != 200 || resp.Header.Get("X-Dry-Run") != "applied" {
+		t.Fatalf("status: %d, header=%q", resp.StatusCode, resp.Header.Get("X-Dry-Run"))
+	}
+	for _, want := range []string{
+		`"would_delete": true`,
+		`"issues_unlinked": 1`,
+		`"document_links": 0`,
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("missing %s in: %s", want, body)
+		}
+	}
+	assertHistoryOps(t, s, nil)
+	roundtrip, err := s.GetFeatureBySlug(repo.ID, "auth")
+	if err != nil || roundtrip == nil {
+		t.Fatalf("feature was actually deleted: %v", err)
+	}
+}
+
+func TestFeatureDeleteNotFound(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	seedRepo(t, s)
+	resp, _ := apiDelete(t, ts.URL+"/repos/MINI/features/nope", nil)
 	if resp.StatusCode != 404 {
 		t.Fatalf("status: %d", resp.StatusCode)
 	}

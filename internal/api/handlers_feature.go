@@ -187,3 +187,57 @@ func (d deps) handleFeatureEdit(w http.ResponseWriter, r *http.Request) {
 	})
 	writeJSON(w, http.StatusOK, updated)
 }
+
+func (d deps) handleFeatureDelete(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	feat, ok := resolveFeatureOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	if isDryRun(r) {
+		preview, err := buildFeatureDeletePreview(d.store, repo, feat)
+		if err != nil {
+			status, code := statusForError(err)
+			writeError(w, status, code, err.Error(), nil)
+			return
+		}
+		writeDryRun(w, http.StatusOK, preview)
+		return
+	}
+	if err := d.store.DeleteFeature(feat.ID); err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Actor:    ActorFromContext(r.Context()),
+		Op:       "feature.delete",
+		Kind:     "feature",
+		TargetID: &feat.ID, TargetLabel: feat.Slug,
+		Details: feat.Title,
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// buildFeatureDeletePreview mirrors internal/cli/feature.go:removeFeature's
+// dry-run branch.
+func buildFeatureDeletePreview(s *store.Store, repo *model.Repo, feat *model.Feature) (*FeatureDeletePreview, error) {
+	issues, err := s.ListIssues(store.IssueFilter{RepoID: &repo.ID, FeatureID: &feat.ID})
+	if err != nil {
+		return nil, err
+	}
+	docs, err := s.ListDocumentsLinkedToFeature(feat.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &FeatureDeletePreview{
+		Feature:        feat,
+		WouldDelete:    true,
+		IssuesUnlinked: len(issues),
+		DocumentLinks:  len(docs),
+	}, nil
+}
