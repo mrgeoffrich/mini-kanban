@@ -25,12 +25,12 @@ import (
 // UUID is the canonical identity — chains of (old → new) for the
 // same uuid resolve forward to the current label.
 type Redirect struct {
-	Kind      string
-	Old       string
-	New       string
-	UUID      string
-	ChangedAt time.Time
-	Reason    string
+	Kind      string    `json:"kind"`
+	Old       string    `json:"old"`
+	New       string    `json:"new"`
+	UUID      string    `json:"uuid"`
+	ChangedAt time.Time `json:"changed_at"`
+	Reason    string    `json:"reason"`
 }
 
 // Allowed reason values, mirroring the design doc.

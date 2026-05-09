@@ -32,32 +32,37 @@ import (
 // other.
 
 // ParsedRepo is the on-disk shape of repos/<prefix>/repo.yaml.
+//
+// JSON tags mirror the YAML field names so `mk sync inspect`'s
+// `-o json` output matches the canonical on-disk schema rather than
+// the Go field names. The yaml/JSON contract is that both speak the
+// same vocabulary — we just use Go's idiomatic PascalCase internally.
 type ParsedRepo struct {
-	UUID            string    `yaml:"uuid"`
-	Prefix          string    `yaml:"prefix"`
-	Name            string    `yaml:"name"`
-	RemoteURL       string    `yaml:"remote_url"`
-	NextIssueNumber int64     `yaml:"next_issue_number"`
-	CreatedAt       time.Time `yaml:"created_at"`
-	UpdatedAt       time.Time `yaml:"updated_at"`
+	UUID            string    `yaml:"uuid" json:"uuid"`
+	Prefix          string    `yaml:"prefix" json:"prefix"`
+	Name            string    `yaml:"name" json:"name"`
+	RemoteURL       string    `yaml:"remote_url" json:"remote_url"`
+	NextIssueNumber int64     `yaml:"next_issue_number" json:"next_issue_number"`
+	CreatedAt       time.Time `yaml:"created_at" json:"created_at"`
+	UpdatedAt       time.Time `yaml:"updated_at" json:"updated_at"`
 }
 
 // ParsedFeature is the on-disk shape of feature.yaml.
 type ParsedFeature struct {
-	UUID            string    `yaml:"uuid"`
-	Slug            string    `yaml:"slug"`
-	Title           string    `yaml:"title"`
-	DescriptionHash string    `yaml:"description_hash"`
-	CreatedAt       time.Time `yaml:"created_at"`
-	UpdatedAt       time.Time `yaml:"updated_at"`
+	UUID            string    `yaml:"uuid" json:"uuid"`
+	Slug            string    `yaml:"slug" json:"slug"`
+	Title           string    `yaml:"title" json:"title"`
+	DescriptionHash string    `yaml:"description_hash" json:"description_hash"`
+	CreatedAt       time.Time `yaml:"created_at" json:"created_at"`
+	UpdatedAt       time.Time `yaml:"updated_at" json:"updated_at"`
 }
 
 // ParsedRef is a {label, uuid} cross-reference. Both fields are
 // always present in emitted YAML; the importer treats uuid as
 // canonical and label as a stale-tolerant hint.
 type ParsedRef struct {
-	Label string `yaml:"label"`
-	UUID  string `yaml:"uuid"`
+	Label string `yaml:"label" json:"label"`
+	UUID  string `yaml:"uuid" json:"uuid"`
 }
 
 // ParsedRelations is the `relations: {blocks, relates_to,
@@ -65,63 +70,63 @@ type ParsedRef struct {
 // emitted (with `[]` when empty), so missing keys here means
 // hand-editing or schema drift.
 type ParsedRelations struct {
-	Blocks      []ParsedRef `yaml:"blocks"`
-	RelatesTo   []ParsedRef `yaml:"relates_to"`
-	DuplicateOf []ParsedRef `yaml:"duplicate_of"`
+	Blocks      []ParsedRef `yaml:"blocks" json:"blocks"`
+	RelatesTo   []ParsedRef `yaml:"relates_to" json:"relates_to"`
+	DuplicateOf []ParsedRef `yaml:"duplicate_of" json:"duplicate_of"`
 }
 
 // ParsedIssue is the on-disk shape of issue.yaml.
 type ParsedIssue struct {
-	UUID            string          `yaml:"uuid"`
-	Number          int64           `yaml:"number"`
-	Title           string          `yaml:"title"`
-	State           string          `yaml:"state"`
-	Assignee        string          `yaml:"assignee"`
-	Tags            []string        `yaml:"tags"`
-	PRs             []string        `yaml:"prs"`
-	Feature         *ParsedRef      `yaml:"feature,omitempty"`
-	Relations       ParsedRelations `yaml:"relations"`
-	DescriptionHash string          `yaml:"description_hash"`
-	CreatedAt       time.Time       `yaml:"created_at"`
-	UpdatedAt       time.Time       `yaml:"updated_at"`
+	UUID            string          `yaml:"uuid" json:"uuid"`
+	Number          int64           `yaml:"number" json:"number"`
+	Title           string          `yaml:"title" json:"title"`
+	State           string          `yaml:"state" json:"state"`
+	Assignee        string          `yaml:"assignee" json:"assignee"`
+	Tags            []string        `yaml:"tags" json:"tags"`
+	PRs             []string        `yaml:"prs" json:"prs"`
+	Feature         *ParsedRef      `yaml:"feature,omitempty" json:"feature,omitempty"`
+	Relations       ParsedRelations `yaml:"relations" json:"relations"`
+	DescriptionHash string          `yaml:"description_hash" json:"description_hash"`
+	CreatedAt       time.Time       `yaml:"created_at" json:"created_at"`
+	UpdatedAt       time.Time       `yaml:"updated_at" json:"updated_at"`
 }
 
 // ParsedComment is the on-disk shape of a comment .yaml file.
 type ParsedComment struct {
-	UUID      string    `yaml:"uuid"`
-	Author    string    `yaml:"author"`
-	BodyHash  string    `yaml:"body_hash"`
-	CreatedAt time.Time `yaml:"created_at"`
+	UUID      string    `yaml:"uuid" json:"uuid"`
+	Author    string    `yaml:"author" json:"author"`
+	BodyHash  string    `yaml:"body_hash" json:"body_hash"`
+	CreatedAt time.Time `yaml:"created_at" json:"created_at"`
 }
 
 // ParsedDocLink is one entry in doc.yaml's `links:` sequence.
 type ParsedDocLink struct {
-	Kind        string `yaml:"kind"` // "issue" | "feature"
-	TargetLabel string `yaml:"target_label"`
-	TargetUUID  string `yaml:"target_uuid"`
+	Kind        string `yaml:"kind" json:"kind"` // "issue" | "feature"
+	TargetLabel string `yaml:"target_label" json:"target_label"`
+	TargetUUID  string `yaml:"target_uuid" json:"target_uuid"`
 }
 
 // ParsedDocument is the on-disk shape of doc.yaml.
 type ParsedDocument struct {
-	UUID        string          `yaml:"uuid"`
-	Filename    string          `yaml:"filename"`
-	Type        string          `yaml:"type"`
-	SourcePath  string          `yaml:"source_path"`
-	Links       []ParsedDocLink `yaml:"links"`
-	ContentHash string          `yaml:"content_hash"`
-	CreatedAt   time.Time       `yaml:"created_at"`
-	UpdatedAt   time.Time       `yaml:"updated_at"`
+	UUID        string          `yaml:"uuid" json:"uuid"`
+	Filename    string          `yaml:"filename" json:"filename"`
+	Type        string          `yaml:"type" json:"type"`
+	SourcePath  string          `yaml:"source_path" json:"source_path"`
+	Links       []ParsedDocLink `yaml:"links" json:"links"`
+	ContentHash string          `yaml:"content_hash" json:"content_hash"`
+	CreatedAt   time.Time       `yaml:"created_at" json:"created_at"`
+	UpdatedAt   time.Time       `yaml:"updated_at" json:"updated_at"`
 }
 
 // ParsedRedirect is one entry in redirects.yaml. The file is a
 // top-level YAML sequence of these.
 type ParsedRedirect struct {
-	Kind      string    `yaml:"kind"` // "issue" | "feature" | "document"
-	Old       string    `yaml:"old"`
-	New       string    `yaml:"new"`
-	UUID      string    `yaml:"uuid"`
-	ChangedAt time.Time `yaml:"changed_at"`
-	Reason    string    `yaml:"reason"`
+	Kind      string    `yaml:"kind" json:"kind"` // "issue" | "feature" | "document"
+	Old       string    `yaml:"old" json:"old"`
+	New       string    `yaml:"new" json:"new"`
+	UUID      string    `yaml:"uuid" json:"uuid"`
+	ChangedAt time.Time `yaml:"changed_at" json:"changed_at"`
+	Reason    string    `yaml:"reason" json:"reason"`
 }
 
 // ParseRepoYAML decodes repo.yaml bytes into a ParsedRepo with strict

@@ -44,10 +44,36 @@ hidden commands for low-level debugging.`,
 	cmd.AddCommand(
 		newSyncInitCmd(),
 		newSyncCloneCmd(),
+		newSyncVerifyCmd(),
+		newSyncInspectCmd(),
 		newSyncExportCmd(),
 		newSyncImportCmd(),
 	)
 	return cmd
+}
+
+// requireSyncRepoMode ensures the current working tree is the root of
+// an mk sync repo (mk-sync.yaml at the working-tree root). Returns
+// the absolute path of that root for the caller to pass on to the
+// engine. Pairs with the inverse check (`if sync.IsSyncRepo … return
+// error`) used by every other sync command.
+//
+// The error message mirrors the wording used by errSyncRepoMode in
+// the opposite direction so users see a consistent pair: one says
+// "this is a sync repo", the other says "this isn't".
+func requireSyncRepoMode() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	info, err := git.Detect(cwd)
+	if err != nil {
+		return "", fmt.Errorf("this command must run inside an mk sync repo (mk-sync.yaml at root): %w", err)
+	}
+	if !sync.IsSyncRepo(info.Root) {
+		return "", fmt.Errorf("this command must run inside an mk sync repo (mk-sync.yaml at root); current working tree is %s — run `mk sync clone` to set one up", info.Root)
+	}
+	return info.Root, nil
 }
 
 // syncRunFlags wires the run-time flags on the bare `mk sync` command.
@@ -335,6 +361,122 @@ type syncInitResult struct {
 // syncCloneResult wraps *sync.CloneResult for the renderText switch.
 type syncCloneResult struct {
 	*sync.CloneResult
+}
+
+// newSyncVerifyCmd handles `mk sync verify`. Must run inside a sync
+// repo. Walks the working tree, prints (or JSON-emits) the
+// VerifyResult, and exits non-zero on any errors (warnings don't
+// affect exit status). Filesystem-only — never opens the local DB.
+func newSyncVerifyCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "verify",
+		Short: "Check sync-repo on-disk consistency (run from inside a sync repo)",
+		Long: `Walks the current sync repo and reports parse failures, uuid
+collisions, dangling cross-references, case-insensitive folder
+collisions, redirect-chain cycles, orphan comment files, and
+body-hash drift.
+
+Errors fail the command (exit non-zero); warnings (dangling refs,
+hash drift) print but don't change exit status.
+
+Run from inside the sync repo's working tree.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if inRemoteMode() {
+				return fmt.Errorf("mk sync verify: not supported in remote mode (operates on the local sync repo only)")
+			}
+			root, err := requireSyncRepoMode()
+			if err != nil {
+				return err
+			}
+			eng := &sync.Engine{}
+			res, err := eng.Verify(context.Background(), root)
+			if err != nil {
+				return err
+			}
+			if err := emit(syncVerifyResult{VerifyResult: res}); err != nil {
+				return err
+			}
+			if len(res.Errors) > 0 {
+				return fmt.Errorf("verify: %d error(s) found", len(res.Errors))
+			}
+			return nil
+		},
+	}
+	return cmd
+}
+
+// syncVerifyResult wraps *sync.VerifyResult so renderText can
+// dispatch on the type. JSON emission uses the embedded pointer's
+// own json tags.
+type syncVerifyResult struct {
+	*sync.VerifyResult
+}
+
+// newSyncInspectCmd handles `mk sync inspect <prefix>` and its
+// variants. Read-only browsing of one prefix's records, useful for
+// debugging sync without touching the project repo's DB.
+func newSyncInspectCmd() *cobra.Command {
+	var (
+		issue    string
+		feature  string
+		document string
+	)
+	cmd := &cobra.Command{
+		Use:   "inspect <prefix>",
+		Short: "Browse a sync repo's records read-only (run from inside a sync repo)",
+		Long: `Prints either a per-prefix summary (record counts plus recent
+renumbers/renames) or one specific record's parsed YAML and body.
+
+Run from inside the sync repo's working tree.
+
+Examples:
+  mk sync inspect MINI
+  mk sync inspect MINI --issue MINI-7
+  mk sync inspect MINI --feature auth-rewrite
+  mk sync inspect MINI --doc auth-overview.md`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if inRemoteMode() {
+				return fmt.Errorf("mk sync inspect: not supported in remote mode (operates on the local sync repo only)")
+			}
+			root, err := requireSyncRepoMode()
+			if err != nil {
+				return err
+			}
+			// At-most-one-target check. Cobra doesn't have native
+			// mutex-flag support, so do it ourselves.
+			selected := 0
+			for _, s := range []string{issue, feature, document} {
+				if s != "" {
+					selected++
+				}
+			}
+			if selected > 1 {
+				return fmt.Errorf("at most one of --issue, --feature, --doc can be set")
+			}
+			eng := &sync.Engine{}
+			res, err := eng.Inspect(context.Background(), root, sync.InspectOptions{
+				Prefix:   args[0],
+				Issue:    issue,
+				Feature:  feature,
+				Document: document,
+			})
+			if err != nil {
+				return err
+			}
+			return emit(syncInspectResult{InspectResult: res})
+		},
+	}
+	cmd.Flags().StringVar(&issue, "issue", "", "show one issue (label, e.g. MINI-7)")
+	cmd.Flags().StringVar(&feature, "feature", "", "show one feature (slug)")
+	cmd.Flags().StringVar(&document, "doc", "", "show one document (filename)")
+	return cmd
+}
+
+// syncInspectResult wraps *sync.InspectResult for renderText.
+type syncInspectResult struct {
+	*sync.InspectResult
 }
 
 func newSyncExportCmd() *cobra.Command {
