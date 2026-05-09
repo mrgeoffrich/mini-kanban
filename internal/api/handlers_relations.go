@@ -193,5 +193,7 @@ func (d deps) handleRelationDelete(w http.ResponseWriter, r *http.Request) {
 			Details:     fmt.Sprintf("unlinked from %s (%d row(s))", b.Key, n),
 		})
 	}
-	w.WriteHeader(http.StatusNoContent)
+	// Idempotent unlink — return 200 with the row count so the CLI can print
+	// a truthful "removed N relation(s)" message instead of guessing.
+	writeJSON(w, http.StatusOK, map[string]int{"removed": int(n)})
 }

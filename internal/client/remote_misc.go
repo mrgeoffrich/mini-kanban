@@ -94,14 +94,13 @@ func (c *remoteClient) UnlinkRelation(ctx context.Context, repo *model.Repo, in 
 		}
 		return &preview, 0, nil
 	}
-	if err := c.doBody(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/relations", nil, in, nil); err != nil {
+	var resp struct {
+		Removed int64 `json:"removed"`
+	}
+	if err := c.doBody(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/relations", nil, in, &resp); err != nil {
 		return nil, 0, err
 	}
-	// Server returns 204 with no body; we don't actually know the
-	// row count. Returning 1 so the CLI's "removed N relation(s)"
-	// message is non-zero. The audit row on the server captures
-	// the real n.
-	return nil, 1, nil
+	return nil, resp.Removed, nil
 }
 
 // doBody is like do() but always sends a body even for DELETE — net/http

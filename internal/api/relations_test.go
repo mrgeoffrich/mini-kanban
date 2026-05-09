@@ -129,11 +129,15 @@ func TestRelationDeleteHappy(t *testing.T) {
 		`{"from":"`+a.Key+`","type":"blocks","to":"`+b.Key+`"}`)
 	resp, body := apiDelete(t, ts.URL+"/repos/MINI/relations",
 		`{"a":"`+a.Key+`","b":"`+b.Key+`"}`)
-	if resp.StatusCode != 204 {
+	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"removed": 1`) {
+		t.Fatalf("body: %s", body)
 	}
 	assertHistoryOps(t, s, []string{"relation.create", "relation.delete"})
 }
+
 
 func TestRelationDeleteDryRunCount(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
@@ -152,15 +156,18 @@ func TestRelationDeleteDryRunCount(t *testing.T) {
 	}
 }
 
-func TestRelationDeleteNoMatchStill204(t *testing.T) {
+func TestRelationDeleteNoMatchStill200(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	a := seedIssue(t, s, repo, "a")
 	b := seedIssue(t, s, repo, "b")
-	resp, _ := apiDelete(t, ts.URL+"/repos/MINI/relations",
+	resp, body := apiDelete(t, ts.URL+"/repos/MINI/relations",
 		`{"a":"`+a.Key+`","b":"`+b.Key+`"}`)
-	if resp.StatusCode != 204 {
+	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), `"removed": 0`) {
+		t.Fatalf("body: %s", body)
 	}
 	assertHistoryOps(t, s, nil)
 }
