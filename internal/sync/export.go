@@ -166,7 +166,7 @@ func (e *Engine) exportFeature(w *exportWriter, repo *model.Repo, f *model.Featu
 	descPath := FeatureDescriptionFile(folder)
 	yamlPath := FeatureYAMLFile(folder)
 
-	descBytes := []byte(f.Description)
+	descBytes := NormalizeBody([]byte(f.Description))
 	if err := w.writeRaw(descPath, descBytes); err != nil {
 		return err
 	}
@@ -200,7 +200,7 @@ func (e *Engine) exportIssue(
 	descPath := IssueDescriptionFile(folder)
 	yamlPath := IssueYAMLFile(folder)
 
-	descBytes := []byte(iss.Description)
+	descBytes := NormalizeBody([]byte(iss.Description))
 	if err := w.writeRaw(descPath, descBytes); err != nil {
 		return 0, err
 	}
@@ -272,7 +272,7 @@ func (e *Engine) exportIssue(
 
 func (e *Engine) exportComment(w *exportWriter, issueFolder string, c *model.Comment) error {
 	yamlPath, mdPath := CommentFile(issueFolder, c.CreatedAt, c.UUID)
-	bodyBytes := []byte(c.Body)
+	bodyBytes := NormalizeBody([]byte(c.Body))
 	if err := w.writeRaw(mdPath, bodyBytes); err != nil {
 		return err
 	}
@@ -300,7 +300,7 @@ func (e *Engine) exportDocument(
 	contentPath := DocumentContentFile(folder)
 	yamlPath := DocumentYAMLFile(folder)
 
-	contentBytes := []byte(d.Content)
+	contentBytes := NormalizeBody([]byte(d.Content))
 	if err := w.writeRaw(contentPath, contentBytes); err != nil {
 		return err
 	}
