@@ -181,3 +181,18 @@ CREATE TABLE IF NOT EXISTS sync_state (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sync_state_kind ON sync_state(kind);
+
+-- sync_remotes records, per (canonical) remote URL, where each user has
+-- their sync repo cloned locally. The remote is the shared truth (also
+-- in .mk/config.yaml of every project that uses this sync repo); the
+-- local path is per-machine and lives only in this table.
+--
+-- last_sync_at is bumped at the end of every successful `mk sync`.
+-- It's purely informational today — useful for `mk status`-style
+-- summaries; never used to gate behaviour.
+CREATE TABLE IF NOT EXISTS sync_remotes (
+    remote_url   TEXT NOT NULL PRIMARY KEY,
+    local_path   TEXT NOT NULL,
+    cloned_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_sync_at DATETIME
+);

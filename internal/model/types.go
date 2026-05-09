@@ -85,3 +85,15 @@ type SyncState struct {
 	LastSyncedAt   time.Time `json:"last_synced_at"`
 	LastSyncedHash string    `json:"last_synced_hash"`
 }
+
+// SyncRemote records, for one canonical remote URL, where this user
+// has the matching sync repo cloned locally. The remote URL is the
+// shared truth (it also appears in every project's .mk/config.yaml);
+// the local path is per-machine and lives only in this DB. LastSyncAt
+// is bumped at the end of every successful `mk sync`.
+type SyncRemote struct {
+	RemoteURL  string     `json:"remote_url"`
+	LocalPath  string     `json:"local_path"`
+	ClonedAt   time.Time  `json:"cloned_at"`
+	LastSyncAt *time.Time `json:"last_sync_at,omitempty"`
+}

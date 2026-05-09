@@ -130,6 +130,18 @@ func migrate(db *sql.DB) error {
 	if err := migrateRepoPathUnique(db); err != nil {
 		return err
 	}
+	// sync_remotes is a Phase-4 addition; CREATE TABLE IF NOT EXISTS is
+	// idempotent so this is fine to run on every Open(). Older DBs
+	// gain the table here; newer DBs already have it from schema.sql.
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS sync_remotes (
+			remote_url   TEXT NOT NULL PRIMARY KEY,
+			local_path   TEXT NOT NULL,
+			cloned_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			last_sync_at DATETIME
+		)`); err != nil {
+		return fmt.Errorf("create sync_remotes: %w", err)
+	}
 	return nil
 }
 
