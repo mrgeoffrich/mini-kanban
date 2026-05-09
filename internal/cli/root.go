@@ -49,6 +49,7 @@ func NewRoot() *cobra.Command {
 		newStatusCmd(),
 		newHistoryCmd(),
 		newSchemaCmd(),
+		newAPICmd(),
 		newInstallSkillCmd(),
 		newTUICmd(),
 	)
