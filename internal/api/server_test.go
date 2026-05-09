@@ -3,6 +3,7 @@ package api_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -276,6 +277,73 @@ func TestReposCreateConflictPrefix(t *testing.T) {
 	env := decode[map[string]any](t, resp2.Body)
 	if env["code"] != "conflict" {
 		t.Fatalf("code: %v", env["code"])
+	}
+}
+
+func TestRepoCreateDryRun(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	body := `{"name":"sample","path":"/tmp/sample-dry-run","prefix":"DRYR"}`
+	resp := do(t, http.MethodPost, ts.URL+"/repos?dry_run=true",
+		bytes.NewBufferString(body), nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != 201 {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status: %d body: %s", resp.StatusCode, raw)
+	}
+	if got := resp.Header.Get("X-Dry-Run"); got != "applied" {
+		t.Fatalf("X-Dry-Run header: %q", got)
+	}
+	projected := decode[map[string]any](t, resp.Body)
+	if projected["prefix"] != "DRYR" {
+		t.Fatalf("projected prefix: %v", projected["prefix"])
+	}
+	if projected["name"] != "sample" {
+		t.Fatalf("projected name: %v", projected["name"])
+	}
+	if projected["path"] != "/tmp/sample-dry-run" {
+		t.Fatalf("projected path: %v", projected["path"])
+	}
+	// next_issue_number should be 1, encoded as a JSON number which decodes as float64.
+	if n, ok := projected["next_issue_number"].(float64); !ok || n != 1 {
+		t.Fatalf("projected next_issue_number: %v", projected["next_issue_number"])
+	}
+
+	// No row should exist in the DB.
+	if _, err := s.GetRepoByPrefix("DRYR"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after dry-run, got: %v", err)
+	}
+	// No history row.
+	rows, err := s.ListHistory(store.HistoryFilter{})
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("dry-run wrote history: %d rows", len(rows))
+	}
+}
+
+func TestRepoCreateDryRunAutoPrefix(t *testing.T) {
+	// Auto-allocated prefix path also honours dry-run and writes nothing.
+	ts, s := newTestAPI(t, api.Options{})
+	body := `{"name":"autopfx","path":"/tmp/auto-dry-run"}`
+	resp := do(t, http.MethodPost, ts.URL+"/repos?dry_run=true",
+		bytes.NewBufferString(body), nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != 201 {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status: %d body: %s", resp.StatusCode, raw)
+	}
+	projected := decode[map[string]any](t, resp.Body)
+	pfx, _ := projected["prefix"].(string)
+	if pfx == "" {
+		t.Fatalf("expected an allocated prefix")
+	}
+	repos, err := s.ListRepos()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(repos) != 0 {
+		t.Fatalf("dry-run created repo rows: %d", len(repos))
 	}
 }
 

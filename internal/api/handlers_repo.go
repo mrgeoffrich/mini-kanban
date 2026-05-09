@@ -96,6 +96,17 @@ func (d deps) handleReposCreate(w http.ResponseWriter, r *http.Request) {
 		prefix = p
 	}
 
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusCreated, &model.Repo{
+			Prefix:          prefix,
+			Name:            in.Name,
+			Path:            in.Path,
+			RemoteURL:       in.RemoteURL,
+			NextIssueNumber: 1,
+		})
+		return
+	}
+
 	repo, err := d.store.CreateRepo(prefix, in.Name, in.Path, in.RemoteURL)
 	if err != nil {
 		status, code := statusForError(err)
