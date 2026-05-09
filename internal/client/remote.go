@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
-	"github.com/mrgeoffrich/mini-kanban/internal/git"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
@@ -172,19 +171,6 @@ func (e *notFoundError) Unwrap() error { return store.ErrNotFound }
 
 // Stub implementations follow. Real bodies arrive verb-by-verb in
 // later commits.
-
-func (c *remoteClient) ListRepos(ctx context.Context) ([]*model.Repo, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) GetRepoByPrefix(ctx context.Context, prefix string) (*model.Repo, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) GetRepoByPath(ctx context.Context, path string) (*model.Repo, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) EnsureRepo(ctx context.Context, info *git.Info) (*model.Repo, bool, error) {
-	return nil, false, errors.New("not implemented")
-}
 
 func (c *remoteClient) ListFeatures(ctx context.Context, repo *model.Repo, withDescription bool) ([]*model.Feature, error) {
 	return nil, errors.New("not implemented")

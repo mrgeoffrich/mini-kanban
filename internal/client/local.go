@@ -117,16 +117,6 @@ func (c *localClient) EnsureRepo(ctx context.Context, info *git.Info) (*model.Re
 // Stub method bodies live in this file initially. Real implementations
 // arrive verb-by-verb in subsequent commits.
 
-func (c *localClient) ListRepos(ctx context.Context) ([]*model.Repo, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) GetRepoByPrefix(ctx context.Context, prefix string) (*model.Repo, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *localClient) GetRepoByPath(ctx context.Context, path string) (*model.Repo, error) {
-	return nil, errors.New("not implemented")
-}
-
 func (c *localClient) ListFeatures(ctx context.Context, repo *model.Repo, withDescription bool) ([]*model.Feature, error) {
 	return nil, errors.New("not implemented")
 }

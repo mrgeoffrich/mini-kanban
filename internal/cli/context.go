@@ -65,7 +65,9 @@ func openClient() (client.Client, error) {
 func inRemoteMode() bool { return remoteURL() != "" }
 
 // resolveRepo finds the repo row for the current working directory, creating
-// it on first use. Errors out if not inside a git repo.
+// it on first use. Errors out if not inside a git repo. Used by handlers
+// that haven't migrated to the client yet; new code should prefer
+// resolveRepoC.
 func resolveRepo(s *store.Store) (*model.Repo, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -97,4 +99,21 @@ func resolveRepo(s *store.Store) (*model.Repo, error) {
 		Details: "auto-registered (" + created.Name + ")",
 	})
 	return created, nil
+}
+
+// resolveRepoC resolves the repo for CWD via the Client abstraction so
+// the same auto-register behaviour works in both local and remote
+// modes. Local backend writes the audit row inline; remote backend
+// triggers the server's POST /repos which writes the row server-side.
+func resolveRepoC(c client.Client) (*model.Repo, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	info, err := git.Detect(cwd)
+	if err != nil {
+		return nil, err
+	}
+	repo, _, err := c.EnsureRepo(context.Background(), info)
+	return repo, err
 }
