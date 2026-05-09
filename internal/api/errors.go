@@ -50,5 +50,31 @@ func statusForError(err error) (int, string) {
 	if strings.Contains(msg, "unknown field") {
 		return http.StatusBadRequest, "invalid_input"
 	}
+	// Validator errors from internal/store/validate.go are plain fmt.Errorf
+	// values without a sentinel; pattern-match the recognisable phrases so a
+	// bad title/body/url/slug surfaces as 400 instead of 500.
+	for _, frag := range []string{
+		"is required",
+		"is not valid UTF-8",
+		"too long",
+		"disallowed control character",
+		"must not contain",
+		"must use http",
+		"must include a host",
+		"must be kebab-case",
+		"is not allowed",
+		"must not have leading",
+		"invalid URL",
+		"unknown state",
+		"unknown relation",
+		"invalid issue key",
+		"invalid issue reference",
+		"cannot be empty",
+		"must not contain '/'",
+	} {
+		if strings.Contains(msg, frag) {
+			return http.StatusBadRequest, "invalid_input"
+		}
+	}
 	return http.StatusInternalServerError, "internal"
 }

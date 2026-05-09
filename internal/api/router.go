@@ -37,6 +37,9 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("PUT /repos/{prefix}/issues/{key}/assignee", d.handleIssueAssign)
 	mux.HandleFunc("DELETE /repos/{prefix}/issues/{key}/assignee", d.handleIssueUnassign)
 
+	mux.HandleFunc("GET /repos/{prefix}/issues/{key}/comments", d.handleCommentsList)
+	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/comments", d.handleCommentAdd)
+
 	// Outermost first: panic recovery wraps everything so a bug in any
 	// later layer still returns a 500 envelope.
 	var h http.Handler = mux
