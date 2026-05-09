@@ -307,6 +307,203 @@ func (d deps) handleIssueAssign(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, updated)
 }
 
+func (d deps) handleIssueEdit(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, present, err := inputio.DecodeStrict[inputs.IssueEditInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	iss, ok := resolveIssueOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	var tPtr, dPtr *string
+	var fPtr **int64
+	if _, ok := present["title"]; ok {
+		if in.Title == nil || *in.Title == "" {
+			writeError(w, http.StatusBadRequest, "invalid_input",
+				"title cannot be empty or null; omit the field to leave it unchanged",
+				map[string]any{"field": "title"})
+			return
+		}
+		tPtr = in.Title
+	}
+	if _, ok := present["description"]; ok {
+		if in.Description == nil {
+			empty := ""
+			dPtr = &empty
+		} else {
+			dPtr = in.Description
+		}
+	}
+	if _, ok := present["feature_slug"]; ok {
+		if in.FeatureSlug == nil || *in.FeatureSlug == "" {
+			var none *int64
+			fPtr = &none
+		} else {
+			feat, err := d.store.GetFeatureBySlug(iss.RepoID, *in.FeatureSlug)
+			if err != nil {
+				status, code := statusForError(err)
+				writeError(w, status, code, fmt.Sprintf("feature %q: %v", *in.FeatureSlug, err), map[string]any{"field": "feature_slug"})
+				return
+			}
+			p := &feat.ID
+			fPtr = &p
+		}
+	}
+	if tPtr == nil && dPtr == nil && fPtr == nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", "nothing to update", nil)
+		return
+	}
+	if isDryRun(r) {
+		projected := *iss
+		if tPtr != nil {
+			projected.Title = *tPtr
+		}
+		if dPtr != nil {
+			projected.Description = *dPtr
+		}
+		if fPtr != nil {
+			projected.FeatureID = *fPtr
+			if *fPtr == nil {
+				projected.FeatureSlug = ""
+			} else {
+				feat, err := d.store.GetFeatureByID(**fPtr)
+				if err != nil {
+					status, code := statusForError(err)
+					writeError(w, status, code, err.Error(), nil)
+					return
+				}
+				projected.FeatureSlug = feat.Slug
+			}
+		}
+		writeDryRun(w, http.StatusOK, &projected)
+		return
+	}
+	if err := d.store.UpdateIssue(iss.ID, tPtr, dPtr, fPtr); err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	updated, err := d.store.GetIssueByID(iss.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID:      &iss.RepoID,
+		RepoPrefix:  repo.Prefix,
+		Actor:       ActorFromContext(r.Context()),
+		Op:          "issue.update",
+		Kind:        "issue",
+		TargetID:    &updated.ID,
+		TargetLabel: updated.Key,
+		Details: updatedFieldList(map[string]bool{
+			"title":       tPtr != nil,
+			"description": dPtr != nil,
+			"feature":     fPtr != nil,
+		}),
+	})
+	writeJSON(w, http.StatusOK, updated)
+}
+
+func (d deps) handleIssueDelete(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	iss, ok := resolveIssueOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	if isDryRun(r) {
+		preview, err := buildIssueDeletePreview(d.store, iss)
+		if err != nil {
+			status, code := statusForError(err)
+			writeError(w, status, code, err.Error(), nil)
+			return
+		}
+		writeDryRun(w, http.StatusOK, preview)
+		return
+	}
+	if err := d.store.DeleteIssue(iss.ID); err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID:      &iss.RepoID,
+		RepoPrefix:  repo.Prefix,
+		Actor:       ActorFromContext(r.Context()),
+		Op:          "issue.delete",
+		Kind:        "issue",
+		TargetID:    &iss.ID,
+		TargetLabel: iss.Key,
+		Details:     iss.Title,
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// updatedFieldList mirrors internal/cli/audit.go:updatedFieldList exactly so
+// audit messages from CLI and HTTP edits read identically. Copied verbatim
+// per CLAUDE.md "no internal/api → internal/cli imports" rule.
+func updatedFieldList(fields map[string]bool) string {
+	var parts []string
+	for name, touched := range fields {
+		if touched {
+			parts = append(parts, name)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "updated " + strings.Join(parts, ",")
+}
+
+// buildIssueDeletePreview mirrors internal/cli/issue.go:previewIssueDelete.
+func buildIssueDeletePreview(s *store.Store, iss *model.Issue) (*IssueDeletePreview, error) {
+	comments, err := s.ListComments(iss.ID)
+	if err != nil {
+		return nil, err
+	}
+	relations, err := s.ListIssueRelations(iss.ID)
+	if err != nil {
+		return nil, err
+	}
+	prs, err := s.ListPRs(iss.ID)
+	if err != nil {
+		return nil, err
+	}
+	docs, err := s.ListDocumentsLinkedToIssue(iss.ID)
+	if err != nil {
+		return nil, err
+	}
+	relCount := 0
+	if relations != nil {
+		relCount = len(relations.Outgoing) + len(relations.Incoming)
+	}
+	return &IssueDeletePreview{
+		Issue:       iss,
+		WouldDelete: true,
+		Cascade: CascadeCount{
+			Comments:      len(comments),
+			Relations:     relCount,
+			PullRequests:  len(prs),
+			DocumentLinks: len(docs),
+			Tags:          len(iss.Tags),
+		},
+	}, nil
+}
+
 func (d deps) handleIssueUnassign(w http.ResponseWriter, r *http.Request) {
 	repo, ok := resolveRepoFromPath(w, r, d.store)
 	if !ok {
