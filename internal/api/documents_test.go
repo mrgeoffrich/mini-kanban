@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/api"
@@ -356,6 +357,65 @@ func TestDocumentUpsertReplaces(t *testing.T) {
 		t.Fatalf("got: %+v", got)
 	}
 	assertHistoryOps(t, s, []string{"document.update"})
+}
+
+func TestDocumentUpsertSourcePathReplaces(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "up.md", model.DocTypeDesigns, "OLD")
+	body := map[string]any{
+		"type":        "designs",
+		"content":     "NEW",
+		"source_path": "docs/up.md",
+	}
+	resp, raw := apiPut(t, ts.URL+"/repos/"+repo.Prefix+"/documents/up.md", body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
+	}
+	got, err := s.GetDocumentByFilename(repo.ID, "up.md", true)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.SourcePath != "docs/up.md" {
+		t.Fatalf("source_path: %q", got.SourcePath)
+	}
+	if got.Content != "NEW" {
+		t.Fatalf("content: %q", got.Content)
+	}
+	rows, err := s.ListHistory(store.HistoryFilter{OldestFirst: true})
+	if err != nil {
+		t.Fatalf("history: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Op != "document.update" {
+		t.Fatalf("history ops: %+v", rows)
+	}
+	if !strings.Contains(rows[0].Details, "source_path") {
+		t.Fatalf("history details missing source_path: %q", rows[0].Details)
+	}
+	if !strings.Contains(rows[0].Details, "content") {
+		t.Fatalf("history details missing content: %q", rows[0].Details)
+	}
+}
+
+func TestDocumentUpsertCreateWithSourcePath(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	body := map[string]any{
+		"type":        "designs",
+		"content":     "BODY",
+		"source_path": "docs/new.md",
+	}
+	resp, raw := apiPut(t, ts.URL+"/repos/"+repo.Prefix+"/documents/new.md", body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
+	}
+	got, err := s.GetDocumentByFilename(repo.ID, "new.md", false)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.SourcePath != "docs/new.md" {
+		t.Fatalf("source_path: %q", got.SourcePath)
+	}
 }
 
 func TestDocumentEditTypeOnly(t *testing.T) {

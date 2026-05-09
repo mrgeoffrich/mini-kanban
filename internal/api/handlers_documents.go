@@ -153,7 +153,6 @@ func (d deps) handleDocumentUpsert(w http.ResponseWriter, r *http.Request) {
 	}
 	// URL filename always wins on PUT — overwrite whatever the body claimed.
 	in.Filename = r.PathValue("filename")
-	in.SourcePath = ""
 	resolved, status, code, msg, field := resolveDocCreateInput(*in)
 	if msg != "" {
 		writeError(w, status, code, msg, fieldDetail(field))
@@ -163,14 +162,15 @@ func (d deps) handleDocumentUpsert(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, store.ErrNotFound) {
 		if isDryRun(r) {
 			writeDryRun(w, http.StatusOK, &model.Document{
-				RepoID:    repo.ID,
-				Filename:  resolved.Filename,
-				Type:      resolved.Type,
-				SizeBytes: int64(len(resolved.Body)),
+				RepoID:     repo.ID,
+				Filename:   resolved.Filename,
+				Type:       resolved.Type,
+				SizeBytes:  int64(len(resolved.Body)),
+				SourcePath: resolved.SourcePath,
 			})
 			return
 		}
-		doc, err := d.store.CreateDocument(repo.ID, resolved.Filename, resolved.Type, resolved.Body, "")
+		doc, err := d.store.CreateDocument(repo.ID, resolved.Filename, resolved.Type, resolved.Body, resolved.SourcePath)
 		if err != nil {
 			s, c := statusForError(err)
 			writeError(w, s, c, err.Error(), nil)
@@ -198,14 +198,22 @@ func (d deps) handleDocumentUpsert(w http.ResponseWriter, r *http.Request) {
 		newType = &t
 	}
 	body := resolved.Body
+	var newSource *string
+	if resolved.SourcePath != "" && resolved.SourcePath != existing.SourcePath {
+		sp := resolved.SourcePath
+		newSource = &sp
+	}
 	if isDryRun(r) {
 		projected := *existing
 		projected.Type = resolved.Type
 		projected.SizeBytes = int64(len(body))
+		if newSource != nil {
+			projected.SourcePath = *newSource
+		}
 		writeDryRun(w, http.StatusOK, &projected)
 		return
 	}
-	if err := d.store.UpdateDocument(existing.ID, newType, &body, nil); err != nil {
+	if err := d.store.UpdateDocument(existing.ID, newType, &body, newSource); err != nil {
 		s, c := statusForError(err)
 		writeError(w, s, c, err.Error(), nil)
 		return
@@ -223,8 +231,9 @@ func (d deps) handleDocumentUpsert(w http.ResponseWriter, r *http.Request) {
 		Kind:     "document",
 		TargetID: &updated.ID, TargetLabel: updated.Filename,
 		Details: updatedFieldList(map[string]bool{
-			"type":    newType != nil,
-			"content": true,
+			"type":        newType != nil,
+			"content":     true,
+			"source_path": newSource != nil,
 		}),
 	})
 	writeJSON(w, http.StatusOK, updated)
