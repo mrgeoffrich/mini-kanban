@@ -107,3 +107,33 @@ type BriefDoc struct {
 type ClaimResult struct {
 	Issue *model.Issue `json:"issue"`
 }
+
+// DocView mirrors internal/cli/output.go:docView so JSON consumers see the
+// same shape from `mk doc show -o json` and `GET /documents/{filename}`.
+type DocView struct {
+	Document *model.Document       `json:"document"`
+	Links    []*model.DocumentLink `json:"links"`
+}
+
+// DocumentCascadeCount counts the link rows that would be removed alongside
+// a document delete. Issue and feature link rows live in the same table —
+// kept separate here to match the cascade preview rendered for issue
+// deletes (CascadeCount) so consumers can pick out either kind.
+type DocumentCascadeCount struct {
+	IssueLinks   int `json:"issue_links"`
+	FeatureLinks int `json:"feature_links"`
+}
+
+// DocumentDeletePreview is the dry-run payload for DELETE /documents/{filename}.
+type DocumentDeletePreview struct {
+	Document    *model.Document      `json:"document"`
+	Cascade     DocumentCascadeCount `json:"cascade"`
+	WouldDelete bool                 `json:"would_delete"`
+}
+
+// DocumentUnlinkPreview is the dry-run payload for DELETE /documents/{filename}/links.
+type DocumentUnlinkPreview struct {
+	Filename    string `json:"filename"`
+	Target      string `json:"target"`
+	WouldRemove int    `json:"would_remove"`
+}
