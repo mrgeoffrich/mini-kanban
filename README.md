@@ -63,8 +63,12 @@ to require `Authorization: Bearer <token>`.
     curl http://127.0.0.1:5320/healthz
 
 The API is intended for local-only callers (web UIs, IDE plugins, agents
-that aren't a child process). See `docs/rest-api-design.md` for the full
-route table; Phase 1 covers `/healthz`, `/schema*`, and `/repos*`.
+that aren't a child process). Currently exposes `/healthz`, `/schema*`,
+`/repos*`, plus the full issue / comment / relation / pull-request / tag
+surface under `/repos/{prefix}/issues*`. Documents and history follow.
+Every mutation accepts `?dry_run=true` (or `X-Dry-Run: 1`); set
+`X-Actor: <name>` so audit rows attribute correctly. See
+`docs/rest-api-design.md` for the full route table.
 
 ## AI-agent integration
 
