@@ -3,12 +3,21 @@ CREATE TABLE IF NOT EXISTS repos (
     uuid               TEXT    NOT NULL,
     prefix             TEXT    NOT NULL UNIQUE,
     name               TEXT    NOT NULL,
-    path               TEXT    NOT NULL UNIQUE,
+    -- path is empty for "phantom" repos (a prefix that exists in the
+    -- sync repo but has no local working tree on this machine yet).
+    -- The UNIQUE-on-path guarantee is preserved by uniq_repos_path
+    -- below, which is partial — multiple phantoms (path = '') can
+    -- coexist while real working trees still get the dedup guarantee.
+    path               TEXT    NOT NULL,
     remote_url         TEXT    NOT NULL DEFAULT '',
     next_issue_number  INTEGER NOT NULL DEFAULT 1,
     created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Partial UNIQUE on repos.path: still enforces "one repo per local
+-- working tree", but lets phantom repos (path = '') coexist.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_repos_path ON repos(path) WHERE path != '';
 
 CREATE TABLE IF NOT EXISTS features (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
