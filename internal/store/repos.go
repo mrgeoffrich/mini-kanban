@@ -11,7 +11,7 @@ import (
 
 var ErrNotFound = errors.New("not found")
 
-const repoCols = `id, uuid, prefix, name, path, remote_url, next_issue_number, created_at`
+const repoCols = `id, uuid, prefix, name, path, remote_url, next_issue_number, created_at, updated_at`
 
 func (s *Store) CreateRepo(prefix, name, path, remoteURL string) (*model.Repo, error) {
 	res, err := s.DB.Exec(
@@ -68,7 +68,7 @@ type rowScanner interface {
 
 func scanRepo(row rowScanner) (*model.Repo, error) {
 	var r model.Repo
-	err := row.Scan(&r.ID, &r.UUID, &r.Prefix, &r.Name, &r.Path, &r.RemoteURL, &r.NextIssueNumber, &r.CreatedAt)
+	err := row.Scan(&r.ID, &r.UUID, &r.Prefix, &r.Name, &r.Path, &r.RemoteURL, &r.NextIssueNumber, &r.CreatedAt, &r.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

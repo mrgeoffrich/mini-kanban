@@ -6,7 +6,8 @@ CREATE TABLE IF NOT EXISTS repos (
     path               TEXT    NOT NULL UNIQUE,
     remote_url         TEXT    NOT NULL DEFAULT '',
     next_issue_number  INTEGER NOT NULL DEFAULT 1,
-    created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS features (

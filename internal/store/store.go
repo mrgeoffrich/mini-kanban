@@ -111,6 +111,18 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_issues_assignee ON issues(assignee)`); err != nil {
 		return err
 	}
+	hasRepoUpdated, err := columnExists(db, "repos", "updated_at")
+	if err != nil {
+		return err
+	}
+	if !hasRepoUpdated {
+		if _, err := db.Exec(`ALTER TABLE repos ADD COLUMN updated_at DATETIME`); err != nil {
+			return err
+		}
+		if _, err := db.Exec(`UPDATE repos SET updated_at = created_at WHERE updated_at IS NULL`); err != nil {
+			return err
+		}
+	}
 	if err := migrateUUIDs(db); err != nil {
 		return err
 	}

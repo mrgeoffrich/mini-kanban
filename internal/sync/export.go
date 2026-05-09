@@ -338,7 +338,7 @@ func buildRepoYAML(repo *model.Repo) (Node, error) {
 		{"next_issue_number", Int(repo.NextIssueNumber)},
 		{"prefix", Str(repo.Prefix)},
 		{"remote_url", Str(repo.RemoteURL)},
-		{"updated_at", Time(repo.CreatedAt)}, // Phase 2: repo has no updated_at column; use created_at as a placeholder so the field is present.
+		{"updated_at", Time(repo.UpdatedAt)},
 		{"uuid", Str(repo.UUID)},
 	}
 	return Map(pairs...), nil

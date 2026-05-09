@@ -11,6 +11,7 @@ type Repo struct {
 	RemoteURL       string    `json:"remote_url,omitempty"`
 	NextIssueNumber int64     `json:"next_issue_number"`
 	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type Feature struct {
