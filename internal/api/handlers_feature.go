@@ -223,8 +223,8 @@ func (d deps) handleFeatureDelete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// buildFeatureDeletePreview mirrors internal/cli/feature.go:removeFeature's
-// dry-run branch.
+// buildFeatureDeletePreview is kept in sync with the local Client backend's
+// DeleteFeature dry-run branch.
 func buildFeatureDeletePreview(s *store.Store, repo *model.Repo, feat *model.Feature) (*FeatureDeletePreview, error) {
 	issues, err := s.ListIssues(store.IssueFilter{RepoID: &repo.ID, FeatureID: &feat.ID})
 	if err != nil {

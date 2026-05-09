@@ -85,11 +85,11 @@ func (d deps) handleIssueBrief(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// collectBriefDocs is the verbatim copy of internal/cli/issue.go:collectBriefDocs.
-// Issue links come first; feature links append to existing entries (extending
-// linked_via) or create new ones. When both link rows have differing --why
-// descriptions, the issue's wins and a warning is appended so nothing is
-// silently dropped.
+// collectBriefDocs is kept in sync with internal/client/local_issue.go's
+// (*localClient).collectBriefDocs. Issue links come first; feature links
+// append to existing entries (extending linked_via) or create new ones.
+// When both link rows have differing --why descriptions, the issue's wins
+// and a warning is appended so nothing is silently dropped.
 func collectBriefDocs(s *store.Store, issueID int64, feat *model.Feature, includeFeature bool) ([]*BriefDoc, []string, error) {
 	warnings := []string{}
 	out := []*BriefDoc{}

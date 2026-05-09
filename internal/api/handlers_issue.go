@@ -469,7 +469,8 @@ func updatedFieldList(fields map[string]bool) string {
 	return "updated " + strings.Join(parts, ",")
 }
 
-// buildIssueDeletePreview mirrors internal/cli/issue.go:previewIssueDelete.
+// buildIssueDeletePreview is kept in sync with the local Client backend's
+// DeleteIssue dry-run branch.
 func buildIssueDeletePreview(s *store.Store, iss *model.Issue) (*IssueDeletePreview, error) {
 	comments, err := s.ListComments(iss.ID)
 	if err != nil {

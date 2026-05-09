@@ -12,8 +12,8 @@ import (
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
 
-// parseRelType mirrors internal/cli/link.go:parseRelType. Hyphens or
-// underscores accepted so callers can use either casing.
+// parseRelType is kept in sync with internal/client/local_misc.go:parseRelType.
+// Hyphens or underscores accepted so callers can use either casing.
 func parseRelType(s string) (model.RelationType, error) {
 	switch strings.ToLower(strings.NewReplacer("-", "_", " ", "_").Replace(strings.TrimSpace(s))) {
 	case "blocks":

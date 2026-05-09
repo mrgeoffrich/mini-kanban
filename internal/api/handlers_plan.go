@@ -34,7 +34,7 @@ func (d deps) handleFeaturePlan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, view)
 }
 
-// isOpenState mirrors internal/cli/plan.go:isOpenState.
+// isOpenState is kept in sync with internal/client/local_feature.go:isOpenState.
 func isOpenState(s model.State) bool {
 	switch s {
 	case model.StateDone, model.StateCancelled, model.StateDuplicate:
@@ -43,8 +43,8 @@ func isOpenState(s model.State) bool {
 	return true
 }
 
-// buildPlanView mirrors internal/cli/plan.go:buildPlan verbatim so JSON
-// consumers see the identical execution-order shape from CLI and HTTP.
+// buildPlanView is kept in sync with the local Client backend's PlanFeature
+// so JSON consumers see the identical execution-order shape from CLI and HTTP.
 func buildPlanView(s *store.Store, f *model.Feature, all []*model.Issue) (*PlanView, error) {
 	open := make([]*model.Issue, 0, len(all))
 	for _, iss := range all {

@@ -97,9 +97,10 @@ func (d deps) mutateTags(w http.ResponseWriter, r *http.Request, add bool) {
 	writeJSON(w, http.StatusOK, updated)
 }
 
-// projectTags mirrors internal/cli/tag.go:projectTags. Returns the tag set
-// that would result from add-or-remove applied to existing. Add preserves
-// existing-first order; remove preserves remaining order.
+// projectTags is kept in sync with internal/client/local_misc.go:projectTags.
+// Returns the tag set that would result from add-or-remove applied to
+// existing. Add preserves existing-first order; remove preserves remaining
+// order.
 func projectTags(existing, delta []string, add bool) []string {
 	have := make(map[string]struct{}, len(existing))
 	for _, t := range existing {

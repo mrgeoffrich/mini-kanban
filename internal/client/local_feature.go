@@ -151,7 +151,7 @@ func (c *localClient) ShowFeature(ctx context.Context, repo *model.Repo, slug st
 	return &FeatureView{Feature: f, Issues: issues, Documents: docs}, nil
 }
 
-// PlanFeature mirrors internal/cli/plan.go:buildPlan.
+// PlanFeature is kept in sync with internal/api/handlers_plan.go:buildPlanView.
 func (c *localClient) PlanFeature(ctx context.Context, repo *model.Repo, slug string) (*PlanView, error) {
 	f, err := c.store.GetFeatureBySlug(repo.ID, slug)
 	if err != nil {
@@ -248,7 +248,7 @@ func (c *localClient) PlanFeature(ctx context.Context, repo *model.Repo, slug st
 	return view, nil
 }
 
-// isOpenState mirrors internal/cli/plan.go:isOpenState.
+// isOpenState is kept in sync with internal/api/handlers_plan.go:isOpenState.
 func isOpenState(s model.State) bool {
 	switch s {
 	case model.StateDone, model.StateCancelled, model.StateDuplicate:
