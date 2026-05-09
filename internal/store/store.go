@@ -154,8 +154,21 @@ func migrateUUIDs(db *sql.DB) error {
 // backfillUUIDs assigns a fresh UUIDv7 to every row whose uuid is NULL
 // (or empty, just in case a partial older migration ran). Row-by-row
 // updates are fine for mk's data sizes (thousands of rows at most).
+//
+// The whole backfill runs inside a single transaction. A crash midway
+// through would otherwise leave rows with NULL uuid; subsequent reads
+// (Scan into a string field) would then fail on every command until
+// the next migrate() pass completed. With the tx, a partial failure
+// rolls back to "all NULL", which is harmless because the next Open()
+// retries idempotently.
 func backfillUUIDs(db *sql.DB, table string) error {
-	rows, err := db.Query(fmt.Sprintf(`SELECT id FROM %s WHERE uuid IS NULL OR uuid = ''`, table))
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(fmt.Sprintf(`SELECT id FROM %s WHERE uuid IS NULL OR uuid = ''`, table))
 	if err != nil {
 		return err
 	}
@@ -176,7 +189,7 @@ func backfillUUIDs(db *sql.DB, table string) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	stmt, err := db.Prepare(fmt.Sprintf(`UPDATE %s SET uuid = ? WHERE id = ?`, table))
+	stmt, err := tx.Prepare(fmt.Sprintf(`UPDATE %s SET uuid = ? WHERE id = ?`, table))
 	if err != nil {
 		return err
 	}
@@ -186,7 +199,7 @@ func backfillUUIDs(db *sql.DB, table string) error {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 func columnExists(db *sql.DB, table, column string) (bool, error) {
