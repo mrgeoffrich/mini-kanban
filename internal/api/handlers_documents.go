@@ -3,7 +3,10 @@ package api
 import (
 	"errors"
 	"net/http"
+	"unicode/utf8"
 
+	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
+	"github.com/mrgeoffrich/mini-kanban/internal/inputio"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
@@ -78,6 +81,198 @@ func (d deps) handleDocumentShow(w http.ResponseWriter, r *http.Request) {
 		links = []*model.DocumentLink{}
 	}
 	writeJSON(w, http.StatusOK, &DocView{Document: doc, Links: links})
+}
+
+func (d deps) handleDocumentCreate(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[inputs.DocAddInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	resolved, status, code, msg, field := resolveDocCreateInput(*in)
+	if msg != "" {
+		writeError(w, status, code, msg, fieldDetail(field))
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusCreated, &model.Document{
+			RepoID:     repo.ID,
+			Filename:   resolved.Filename,
+			Type:       resolved.Type,
+			SizeBytes:  int64(len(resolved.Body)),
+			SourcePath: resolved.SourcePath,
+		})
+		return
+	}
+	doc, err := d.store.CreateDocument(repo.ID, resolved.Filename, resolved.Type, resolved.Body, resolved.SourcePath)
+	if err != nil {
+		if errors.Is(err, store.ErrDocumentExists) {
+			writeError(w, http.StatusConflict, "conflict", err.Error(), nil)
+			return
+		}
+		s, c := statusForError(err)
+		writeError(w, s, c, err.Error(), nil)
+		return
+	}
+	doc.Content = "" // mirror CLI's `mk doc add`: don't echo body on create.
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Actor:    ActorFromContext(r.Context()),
+		Op:       "document.create",
+		Kind:     "document",
+		TargetID: &doc.ID, TargetLabel: doc.Filename,
+		Details: "type=" + string(doc.Type),
+	})
+	writeJSON(w, http.StatusCreated, doc)
+}
+
+func (d deps) handleDocumentUpsert(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[inputs.DocAddInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	// URL filename always wins on PUT — overwrite whatever the body claimed.
+	in.Filename = r.PathValue("filename")
+	in.SourcePath = ""
+	resolved, status, code, msg, field := resolveDocCreateInput(*in)
+	if msg != "" {
+		writeError(w, status, code, msg, fieldDetail(field))
+		return
+	}
+	existing, err := d.store.GetDocumentByFilename(repo.ID, resolved.Filename, false)
+	if errors.Is(err, store.ErrNotFound) {
+		if isDryRun(r) {
+			writeDryRun(w, http.StatusOK, &model.Document{
+				RepoID:    repo.ID,
+				Filename:  resolved.Filename,
+				Type:      resolved.Type,
+				SizeBytes: int64(len(resolved.Body)),
+			})
+			return
+		}
+		doc, err := d.store.CreateDocument(repo.ID, resolved.Filename, resolved.Type, resolved.Body, "")
+		if err != nil {
+			s, c := statusForError(err)
+			writeError(w, s, c, err.Error(), nil)
+			return
+		}
+		recordOp(d.store, d.logger, model.HistoryEntry{
+			RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+			Actor:    ActorFromContext(r.Context()),
+			Op:       "document.create",
+			Kind:     "document",
+			TargetID: &doc.ID, TargetLabel: doc.Filename,
+			Details: "type=" + string(doc.Type),
+		})
+		writeJSON(w, http.StatusOK, doc)
+		return
+	}
+	if err != nil {
+		s, c := statusForError(err)
+		writeError(w, s, c, err.Error(), nil)
+		return
+	}
+	var newType *model.DocumentType
+	if resolved.Type != existing.Type {
+		t := resolved.Type
+		newType = &t
+	}
+	body := resolved.Body
+	if isDryRun(r) {
+		projected := *existing
+		projected.Type = resolved.Type
+		projected.SizeBytes = int64(len(body))
+		writeDryRun(w, http.StatusOK, &projected)
+		return
+	}
+	if err := d.store.UpdateDocument(existing.ID, newType, &body, nil); err != nil {
+		s, c := statusForError(err)
+		writeError(w, s, c, err.Error(), nil)
+		return
+	}
+	updated, err := d.store.GetDocumentByID(existing.ID, false)
+	if err != nil {
+		s, c := statusForError(err)
+		writeError(w, s, c, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Actor:    ActorFromContext(r.Context()),
+		Op:       "document.update",
+		Kind:     "document",
+		TargetID: &updated.ID, TargetLabel: updated.Filename,
+		Details: updatedFieldList(map[string]bool{
+			"type":    newType != nil,
+			"content": true,
+		}),
+	})
+	writeJSON(w, http.StatusOK, updated)
+}
+
+// resolvedDocCreate is the validated tuple that document create/upsert
+// hand off to the store.
+type resolvedDocCreate struct {
+	Filename   string
+	Type       model.DocumentType
+	Body       string
+	SourcePath string
+}
+
+// resolveDocCreateInput validates the JSON payload for create/upsert. Returns
+// (resolved, status, code, msg, field). msg is non-empty on failure; the
+// caller writes the error envelope so this helper stays HTTP-agnostic.
+func resolveDocCreateInput(in inputs.DocAddInput) (*resolvedDocCreate, int, string, string, string) {
+	if in.Filename == "" {
+		return nil, http.StatusBadRequest, "invalid_input", "filename is required", "filename"
+	}
+	clean, err := store.ValidateDocFilenameStrict(in.Filename)
+	if err != nil {
+		return nil, http.StatusBadRequest, "invalid_input", err.Error(), "filename"
+	}
+	if in.Type == "" {
+		return nil, http.StatusBadRequest, "invalid_input", "type is required", "type"
+	}
+	t, err := model.ParseDocumentType(in.Type)
+	if err != nil {
+		return nil, http.StatusBadRequest, "invalid_input", err.Error(), "type"
+	}
+	if in.Content == "" {
+		return nil, http.StatusBadRequest, "invalid_input", "content is required", "content"
+	}
+	if !utf8.ValidString(in.Content) {
+		return nil, http.StatusBadRequest, "invalid_input", "document is not valid UTF-8 text; only text documents are supported", "content"
+	}
+	return &resolvedDocCreate{
+		Filename:   clean,
+		Type:       t,
+		Body:       in.Content,
+		SourcePath: in.SourcePath,
+	}, 0, "", "", ""
+}
+
+func fieldDetail(field string) map[string]any {
+	if field == "" {
+		return nil
+	}
+	return map[string]any{"field": field}
 }
 
 // resolveDocumentOnRepo pulls {filename} from the URL, validates it, and

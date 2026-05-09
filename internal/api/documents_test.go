@@ -193,3 +193,187 @@ func decodeNoBody(resp *http.Response) {
 	quietRead(resp.Body)
 	resp.Body.Close()
 }
+
+func TestDocumentCreateHappy(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	body := map[string]any{
+		"filename": "design.md",
+		"type":     "designs",
+		"content":  "BODY",
+	}
+	resp, raw := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/documents", body)
+	if resp.StatusCode != 201 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
+	}
+	var d model.Document
+	_ = json.Unmarshal(raw, &d)
+	if d.Filename != "design.md" || d.Type != model.DocTypeDesigns || d.SizeBytes != 4 {
+		t.Fatalf("got: %+v", d)
+	}
+	if d.Content != "" {
+		t.Fatalf("expected lean (no content), got %q", d.Content)
+	}
+	assertHistoryOps(t, s, []string{"document.create"})
+}
+
+func TestDocumentCreateDryRunQuery(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	body := map[string]any{
+		"filename": "design.md", "type": "designs", "content": "BODY",
+	}
+	resp, _ := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/documents?dry_run=true", body)
+	if resp.StatusCode != 201 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	if resp.Header.Get("X-Dry-Run") != "applied" {
+		t.Fatalf("X-Dry-Run header: %q", resp.Header.Get("X-Dry-Run"))
+	}
+	rows, _ := s.ListHistory(store.HistoryFilter{})
+	if len(rows) != 0 {
+		t.Fatalf("dry run wrote history: %d", len(rows))
+	}
+	docs, _ := s.ListDocuments(store.DocumentFilter{RepoID: repo.ID})
+	if len(docs) != 0 {
+		t.Fatalf("dry run created doc: %d", len(docs))
+	}
+}
+
+func TestDocumentCreateDryRunHeader(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	body := map[string]any{
+		"filename": "design.md", "type": "designs", "content": "BODY",
+	}
+	resp, _ := apiReq(t, http.MethodPost,
+		ts.URL+"/repos/"+repo.Prefix+"/documents", body,
+		map[string]string{"X-Dry-Run": "1"})
+	if resp.StatusCode != 201 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	docs, _ := s.ListDocuments(store.DocumentFilter{RepoID: repo.ID})
+	if len(docs) != 0 {
+		t.Fatalf("dry run created: %d", len(docs))
+	}
+}
+
+func TestDocumentCreateMissingFilename(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	resp, _ := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/documents",
+		map[string]any{"type": "designs", "content": "BODY"})
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestDocumentCreateMissingType(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	resp, _ := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/documents",
+		map[string]any{"filename": "x.md", "content": "BODY"})
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestDocumentCreateMissingContent(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	resp, _ := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/documents",
+		map[string]any{"filename": "x.md", "type": "designs"})
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestDocumentCreateConflict(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "design.md", model.DocTypeDesigns, "ALPHA")
+	body := map[string]any{
+		"filename": "design.md", "type": "designs", "content": "BETA",
+	}
+	resp, _ := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/documents", body)
+	if resp.StatusCode != 409 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestDocumentCreateUnknownField(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	resp, _ := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/documents",
+		map[string]any{"filename": "x.md", "type": "designs", "content": "B", "nope": 1})
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestDocumentCreateBadFilename(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	for _, bad := range []string{" leading.md", "trailing.md ", "a/b.md", "with\x00nul.md"} {
+		body := map[string]any{"filename": bad, "type": "designs", "content": "B"}
+		resp, _ := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/documents", body)
+		if resp.StatusCode != 400 {
+			t.Fatalf("filename=%q expected 400, got %d", bad, resp.StatusCode)
+		}
+	}
+}
+
+func TestDocumentUpsertCreates(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	body := map[string]any{"type": "designs", "content": "BODY"}
+	resp, raw := apiPut(t, ts.URL+"/repos/"+repo.Prefix+"/documents/up.md", body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
+	}
+	var d model.Document
+	_ = json.Unmarshal(raw, &d)
+	if d.Filename != "up.md" || d.Type != model.DocTypeDesigns {
+		t.Fatalf("got: %+v", d)
+	}
+	assertHistoryOps(t, s, []string{"document.create"})
+}
+
+func TestDocumentUpsertReplaces(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedDocument(t, s, repo, "up.md", model.DocTypeDesigns, "OLD")
+	body := map[string]any{"type": "architecture", "content": "NEW"}
+	resp, raw := apiPut(t, ts.URL+"/repos/"+repo.Prefix+"/documents/up.md", body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
+	}
+	got, err := s.GetDocumentByFilename(repo.ID, "up.md", true)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Type != model.DocTypeArchitecture || got.Content != "NEW" {
+		t.Fatalf("got: %+v", got)
+	}
+	assertHistoryOps(t, s, []string{"document.update"})
+}
+
+func TestDocumentUpsertURLFilenameWins(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	body := map[string]any{
+		"filename": "lying.md", // body lies; URL wins
+		"type":     "designs",
+		"content":  "BODY",
+	}
+	resp, _ := apiPut(t, ts.URL+"/repos/"+repo.Prefix+"/documents/truth.md", body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	if _, err := s.GetDocumentByFilename(repo.ID, "lying.md", false); err == nil {
+		t.Fatalf("body filename should not have been used")
+	}
+	if _, err := s.GetDocumentByFilename(repo.ID, "truth.md", false); err != nil {
+		t.Fatalf("URL filename not stored: %v", err)
+	}
+}
