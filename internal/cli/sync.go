@@ -2,38 +2,345 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrgeoffrich/mini-kanban/internal/git"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
 	"github.com/mrgeoffrich/mini-kanban/internal/sync"
 )
 
-// newSyncCmd registers the `mk sync` command group. Phase 3 ships
-// hidden `mk sync export <path>` and `mk sync import <path>`; the
-// parent group itself is hidden — these are developer/debugging
-// surfaces. The user-facing `mk sync` (full pull/import/export/
-// commit/push) lands in Phase 4 and that's when we'll un-hide it
-// and document it in SKILL.md.
+// newSyncCmd registers the `mk sync` command group. Phase 4 ships the
+// full user-facing surface: `mk sync init`, `mk sync clone`, and the
+// bare `mk sync` (steady-state). The Phase-2/3 development verbs
+// `mk sync export` and `mk sync import` stay registered (and hidden)
+// — they're still useful for diagnostics and their tests guard
+// behaviour we care about.
+//
+// The parent group is no longer hidden: `mk help sync` shows it and
+// the bootstrap flow.
 func newSyncCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:    "sync",
-		Short:  "Git-backed sync (developer preview)",
-		Hidden: true,
+		Use:   "sync",
+		Short: "Git-backed sync of the local DB to a shared sync repo",
+		Long: `Synchronise the local mk database with a shared sync repo (a separate
+git repo whose working tree carries one folder per project, with YAML
+and markdown for each record). Run with no subcommand to do a full
+pull → import → export → commit → push cycle.
+
+Two non-overlapping bootstrap flows:
+  mk sync init <local-path> [--remote URL]   # first time setup
+  mk sync clone [<local-path>]               # join an existing sync repo
+
+The Phase-2 dev tools (mk sync export / import) remain available as
+hidden commands for low-level debugging.`,
+		RunE: runSync, // bare `mk sync` runs the steady-state pipeline
 	}
+	syncRunFlags(cmd)
 	cmd.AddCommand(
+		newSyncInitCmd(),
+		newSyncCloneCmd(),
 		newSyncExportCmd(),
 		newSyncImportCmd(),
 	)
 	return cmd
 }
 
+// syncRunFlags wires the run-time flags on the bare `mk sync` command.
+// Kept in a helper so the same flag set lives in one place; the cobra
+// docs render them off cmd.Flags() either way.
+func syncRunFlags(cmd *cobra.Command) {
+	cmd.Flags().Bool("no-import", false, "skip the import phase (files → DB)")
+	cmd.Flags().Bool("no-export", false, "skip the export phase (DB → files)")
+	cmd.Flags().Bool("no-push", false, "do everything but the final git push")
+}
+
+// runSync is the steady-state `mk sync`. Resolves the project,
+// .mk/config.yaml, and the local sync-clone path, then hands off to
+// sync.Engine.Run.
+func runSync(cmd *cobra.Command, _ []string) error {
+	if inRemoteMode() {
+		return fmt.Errorf("mk sync: not supported in remote mode (operates on the local DB only)")
+	}
+
+	noImport, _ := cmd.Flags().GetBool("no-import")
+	noExport, _ := cmd.Flags().GetBool("no-export")
+	noPush, _ := cmd.Flags().GetBool("no-push")
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	info, err := git.Detect(cwd)
+	if err != nil {
+		return err
+	}
+	if sync.IsSyncRepo(info.Root) {
+		return fmt.Errorf("mk sync runs from inside a project repo, not a sync repo (%s)", info.Root)
+	}
+
+	cfg, err := sync.ReadProjectConfig(info.Root)
+	if err != nil {
+		if errors.Is(err, sync.ErrNoConfig) {
+			return fmt.Errorf("no .mk/config.yaml found at %s; run 'mk sync init' or 'mk sync clone' first", info.Root)
+		}
+		return err
+	}
+	if cfg.Sync.Remote == "" {
+		return fmt.Errorf("%s/.mk/config.yaml has no sync.remote set", info.Root)
+	}
+
+	s, err := openStore()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	rec, err := s.GetSyncRemote(cfg.Sync.Remote)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return fmt.Errorf("no local clone of sync remote %s; run 'mk sync clone' first", cfg.Sync.Remote)
+		}
+		return err
+	}
+	syncRepo, err := git.Open(rec.LocalPath)
+	if err != nil {
+		return fmt.Errorf("local sync clone at %s is missing or unreadable: %w", rec.LocalPath, err)
+	}
+
+	dbPath := opts.dbPath
+	if dbPath == "" {
+		def, _ := store.DefaultPath()
+		dbPath = def
+	}
+	release, err := sync.AcquireSyncLock(dbPath)
+	if err != nil {
+		return err
+	}
+	defer release() //nolint:errcheck — best-effort lock release
+
+	eng := &sync.Engine{Store: s, Actor: actor(), DryRun: opts.dryRun}
+	res, err := eng.Run(context.Background(), info.Root, syncRepo, sync.RunOptions{
+		NoImport: noImport,
+		NoExport: noExport,
+		NoPush:   noPush,
+		DryRun:   opts.dryRun,
+	})
+	if err != nil {
+		return err
+	}
+
+	// Audit + last_sync_at bookkeeping for non-dryrun runs.
+	if !opts.dryRun {
+		recordOp(s, model.HistoryEntry{
+			Op:      "sync.run",
+			Kind:    "repo",
+			Details: syncRunDetails(res),
+		})
+		if err := s.MarkSyncCompleted(cfg.Sync.Remote); err != nil {
+			fmt.Fprintln(os.Stderr, "mk: warning: failed to update last_sync_at:", err)
+		}
+		// Per-event audit ops mirror Phase 3's recordSyncImportOps.
+		if res.Import != nil {
+			recordSyncImportOps(s, res.Import)
+		}
+	}
+
+	out := syncRunResult{RunResult: res}
+	if opts.dryRun {
+		return emitDryRun(out)
+	}
+	return emit(out)
+}
+
+// syncRunDetails formats a one-line summary of a RunResult for the
+// audit log. Counts come straight from the embedded import / export
+// results.
+func syncRunDetails(res *sync.RunResult) string {
+	if res == nil {
+		return ""
+	}
+	parts := ""
+	if res.Import != nil {
+		parts += fmt.Sprintf("inserted=%d updated=%d noop=%d ",
+			res.Import.Inserted, res.Import.Updated, res.Import.NoOp)
+	}
+	if res.Export != nil && res.Export.ExportResult != nil {
+		parts += fmt.Sprintf("renames=%d writes=%d deletes=%d ",
+			res.Export.Renames, res.Export.Writes, res.Export.Deletes)
+	}
+	if res.Commit != "" {
+		parts += "commit=" + res.Commit
+	}
+	if res.Pushed {
+		parts += " pushed=true"
+	}
+	return parts
+}
+
+// syncRunResult wraps *sync.RunResult so renderText can dispatch a
+// text renderer for the steady-state command without leaking sync.*
+// types into the output package.
+type syncRunResult struct {
+	*sync.RunResult
+}
+
+// newSyncInitCmd handles `mk sync init <local-path> [--remote URL]`.
+// Refuses to bootstrap against a remote that already has commits; the
+// caller is expected to use `mk sync clone` for that case.
+func newSyncInitCmd() *cobra.Command {
+	var remote string
+	cmd := &cobra.Command{
+		Use:   "init <local-path>",
+		Short: "Create a new sync repo and seed it with the project's data",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if inRemoteMode() {
+				return fmt.Errorf("mk sync init: not supported in remote mode (operates on the local DB only)")
+			}
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			info, err := git.Detect(cwd)
+			if err != nil {
+				return err
+			}
+			if sync.IsSyncRepo(info.Root) {
+				return fmt.Errorf("mk sync init runs from inside a project repo, not a sync repo (%s)", info.Root)
+			}
+
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+
+			eng := &sync.Engine{Store: s, Actor: actor(), DryRun: opts.dryRun}
+			res, err := eng.InitSyncRepo(context.Background(), info.Root, sync.InitOptions{
+				LocalPath: args[0],
+				Remote:    remote,
+			})
+			if err != nil {
+				return err
+			}
+			if !opts.dryRun {
+				recordOp(s, model.HistoryEntry{
+					Op:      "sync.init",
+					Kind:    "repo",
+					Details: fmt.Sprintf("local=%s remote=%s commit=%s pushed=%v", res.LocalPath, res.Remote, res.CommitSHA, res.Pushed),
+				})
+			}
+			out := syncInitResult{InitResult: res}
+			if opts.dryRun {
+				return emitDryRun(out)
+			}
+			return emit(out)
+		},
+	}
+	cmd.Flags().StringVar(&remote, "remote", "", "git URL of the remote sync repo (sets up origin and writes .mk/config.yaml)")
+	return cmd
+}
+
+// newSyncCloneCmd handles `mk sync clone [<local-path>]
+// [--allow-renumber] [--dry-run]`. Without `--allow-renumber`, errors
+// with a preview when the local DB has data that would be renumbered.
+func newSyncCloneCmd() *cobra.Command {
+	var allowRenumber bool
+	cmd := &cobra.Command{
+		Use:   "clone [<local-path>]",
+		Short: "Join an existing sync repo and import its data into the local DB",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if inRemoteMode() {
+				return fmt.Errorf("mk sync clone: not supported in remote mode (operates on the local DB only)")
+			}
+			cwd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			info, err := git.Detect(cwd)
+			if err != nil {
+				return err
+			}
+			if sync.IsSyncRepo(info.Root) {
+				return fmt.Errorf("mk sync clone runs from inside a project repo, not a sync repo (%s)", info.Root)
+			}
+
+			cfg, err := sync.ReadProjectConfig(info.Root)
+			if err != nil {
+				if errors.Is(err, sync.ErrNoConfig) {
+					return fmt.Errorf("no .mk/config.yaml at %s; ask the project owner to run 'mk sync init --remote <url>' first", info.Root)
+				}
+				return err
+			}
+			if cfg.Sync.Remote == "" {
+				return fmt.Errorf("%s/.mk/config.yaml has no sync.remote set", info.Root)
+			}
+
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+
+			localPath := ""
+			if len(args) == 1 {
+				localPath = args[0]
+			}
+			eng := &sync.Engine{Store: s, Actor: actor(), DryRun: opts.dryRun}
+			res, err := eng.CloneSyncRepo(context.Background(), info.Root, sync.CloneOptions{
+				LocalPath:     localPath,
+				Remote:        cfg.Sync.Remote,
+				AllowRenumber: allowRenumber,
+				DryRun:        opts.dryRun,
+			})
+			if err != nil {
+				// Even on error, emit the preview if the engine populated one.
+				if res != nil && res.PreviewCollisions != nil {
+					_ = emit(syncCloneResult{CloneResult: res})
+				}
+				return err
+			}
+			if !opts.dryRun {
+				recordOp(s, model.HistoryEntry{
+					Op:      "sync.clone",
+					Kind:    "repo",
+					Details: fmt.Sprintf("local=%s remote=%s", res.LocalPath, res.Remote),
+				})
+				if res.Import != nil {
+					recordSyncImportOps(s, res.Import)
+				}
+			}
+			out := syncCloneResult{CloneResult: res}
+			if opts.dryRun {
+				return emitDryRun(out)
+			}
+			return emit(out)
+		},
+	}
+	cmd.Flags().BoolVar(&allowRenumber, "allow-renumber", false, "permit local rows to be renumbered/renamed to resolve collisions")
+	return cmd
+}
+
+// syncInitResult wraps *sync.InitResult for the renderText switch.
+type syncInitResult struct {
+	*sync.InitResult
+}
+
+// syncCloneResult wraps *sync.CloneResult for the renderText switch.
+type syncCloneResult struct {
+	*sync.CloneResult
+}
+
 func newSyncExportCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "export <path>",
-		Short:  "Export the local DB to a folder as YAML + markdown",
+		Short:  "Export the local DB to a folder as YAML + markdown (diagnostic)",
 		Args:   cobra.ExactArgs(1),
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -73,19 +380,13 @@ type exportResult struct {
 	*sync.ExportResult
 }
 
-// newSyncImportCmd is the Phase-3 inbound counterpart to `mk sync
-// export`. Reads `<path>` (a sync-repo working tree) and applies it
-// to the local DB through the four-phase import pipeline. Honours
-// `--dry-run` (rolls back the outer transaction) and `--user`
-// (audit ops attribute the work).
-//
-// Hidden in the same spirit as `mk sync export`: this is a Phase-3
-// development surface; the user-facing `mk sync` (full
-// pull/import/export/commit/push) lands in Phase 4.
+// newSyncImportCmd is the hidden Phase-3 inbound counterpart to
+// `mk sync export`. Useful for diagnosing sync issues without going
+// through the full `mk sync` pipeline.
 func newSyncImportCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "import <path>",
-		Short:  "Import a sync-repo folder into the local DB",
+		Short:  "Import a sync-repo folder into the local DB (diagnostic)",
 		Args:   cobra.ExactArgs(1),
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {

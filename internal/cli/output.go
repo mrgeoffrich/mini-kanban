@@ -113,6 +113,12 @@ func renderText(w io.Writer, v any) error {
 		printExportResult(w, x)
 	case importResult:
 		printImportResult(w, x)
+	case syncRunResult:
+		printSyncRunResult(w, x)
+	case syncInitResult:
+		printSyncInitResult(w, x)
+	case syncCloneResult:
+		printSyncCloneResult(w, x)
 	case message:
 		fmt.Fprintln(w, x.Text)
 	default:
@@ -410,6 +416,104 @@ func printImportResult(w io.Writer, r importResult) {
 		fmt.Fprintln(w, "Warnings:")
 		for _, w2 := range r.Warnings {
 			fmt.Fprintf(w, "  %s\n", w2)
+		}
+	}
+}
+
+// printSyncRunResult renders the result of a steady-state `mk sync`.
+// Pulls per-phase counts (import, export) and the commit/push status
+// out of the embedded RunResult.
+func printSyncRunResult(w io.Writer, r syncRunResult) {
+	if r.RunResult == nil {
+		return
+	}
+	fmt.Fprintln(w, "mk sync complete")
+	if r.Import != nil {
+		fmt.Fprintf(w, "  imported: inserted=%d updated=%d noop=%d\n",
+			r.Import.Inserted, r.Import.Updated, r.Import.NoOp)
+		if len(r.Import.Renumbered) > 0 {
+			fmt.Fprintln(w, "  renumbered:")
+			for _, e := range r.Import.Renumbered {
+				fmt.Fprintf(w, "    %s-%d -> %s-%d\n", e.Prefix, e.OldNumber, e.Prefix, e.NewNumber)
+			}
+		}
+		if len(r.Import.Renamed) > 0 {
+			fmt.Fprintln(w, "  renamed:")
+			for _, e := range r.Import.Renamed {
+				fmt.Fprintf(w, "    %s %s -> %s\n", e.Kind, e.Old, e.New)
+			}
+		}
+		if len(r.Import.Deleted) > 0 {
+			fmt.Fprintf(w, "  deleted: %d\n", len(r.Import.Deleted))
+		}
+	}
+	if r.Export != nil {
+		fmt.Fprintf(w, "  exported: renames=%d writes=%d deletes=%d\n",
+			r.Export.Renames, r.Export.Writes, r.Export.Deletes)
+	}
+	if r.Commit != "" {
+		fmt.Fprintf(w, "  commit:   %s\n", r.Commit)
+	} else {
+		fmt.Fprintln(w, "  commit:   (no changes)")
+	}
+	if r.Pushed {
+		fmt.Fprintln(w, "  pushed:   yes")
+	}
+	for _, msg := range r.Warnings {
+		fmt.Fprintf(w, "  warning:  %s\n", msg)
+	}
+}
+
+// printSyncInitResult renders the result of `mk sync init`. The
+// emphasis is on confirming what was set up (path / remote / commit)
+// rather than re-spamming the export counts.
+func printSyncInitResult(w io.Writer, r syncInitResult) {
+	if r.InitResult == nil {
+		return
+	}
+	fmt.Fprintf(w, "Initialised sync repo at %s\n", r.LocalPath)
+	if r.Remote != "" {
+		fmt.Fprintf(w, "  remote:   %s\n", r.Remote)
+	}
+	if r.Export != nil {
+		fmt.Fprintf(w, "  exported: %d files (%d bytes)\n", r.Export.Files, r.Export.BytesWritten)
+	}
+	if r.CommitSHA != "" {
+		fmt.Fprintf(w, "  commit:   %s\n", r.CommitSHA)
+	}
+	if r.Pushed {
+		fmt.Fprintln(w, "  pushed:   yes")
+	}
+}
+
+// printSyncCloneResult renders the result of `mk sync clone`. When a
+// preview is present (collisions detected without --allow-renumber),
+// surface the projected renumbers / renames so the user can decide
+// whether to re-run with --allow-renumber.
+func printSyncCloneResult(w io.Writer, r syncCloneResult) {
+	if r.CloneResult == nil {
+		return
+	}
+	fmt.Fprintf(w, "Sync repo at %s\n", r.LocalPath)
+	if r.Remote != "" {
+		fmt.Fprintf(w, "  remote:   %s\n", r.Remote)
+	}
+	if r.Import != nil {
+		fmt.Fprintf(w, "  imported: inserted=%d updated=%d noop=%d\n",
+			r.Import.Inserted, r.Import.Updated, r.Import.NoOp)
+	}
+	if r.PreviewCollisions != nil {
+		if len(r.PreviewCollisions.Renumbered) > 0 {
+			fmt.Fprintln(w, "  would renumber:")
+			for _, e := range r.PreviewCollisions.Renumbered {
+				fmt.Fprintf(w, "    %s-%d -> %s-%d\n", e.Prefix, e.OldNumber, e.Prefix, e.NewNumber)
+			}
+		}
+		if len(r.PreviewCollisions.Renamed) > 0 {
+			fmt.Fprintln(w, "  would rename:")
+			for _, e := range r.PreviewCollisions.Renamed {
+				fmt.Fprintf(w, "    %s %s -> %s\n", e.Kind, e.Old, e.New)
+			}
 		}
 	}
 }
