@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -8,7 +9,6 @@ import (
 	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
 	"github.com/mrgeoffrich/mini-kanban/internal/inputio"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
-	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
 
 func newFeatureCmd() *cobra.Command {
@@ -42,7 +42,7 @@ func featureAddCmd() *cobra.Command {
 				if in.Title == "" {
 					return fmt.Errorf("title is required")
 				}
-				return createFeature(in.Title, in.Slug, in.Description)
+				return createFeature(*in)
 			}
 			if len(args) != 1 {
 				return fmt.Errorf("requires <title> positional or --json")
@@ -51,7 +51,11 @@ func featureAddCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return createFeature(args[0], slug, desc)
+			return createFeature(inputs.FeatureAddInput{
+				Title:       args[0],
+				Slug:        slug,
+				Description: desc,
+			})
 		},
 	}
 	cmd.Flags().StringVar(&slug, "slug", "", "explicit slug (default: derived from title)")
@@ -61,38 +65,23 @@ func featureAddCmd() *cobra.Command {
 	return cmd
 }
 
-func createFeature(title, slug, description string) error {
-	s, err := openStore()
+func createFeature(in inputs.FeatureAddInput) error {
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	repo, err := resolveRepo(s)
+	defer c.Close()
+	repo, err := resolveRepoC(c)
 	if err != nil {
 		return err
 	}
-	if slug == "" {
-		slug = store.Slugify(title)
+	f, err := c.CreateFeature(context.Background(), repo, in, opts.dryRun)
+	if err != nil {
+		return err
 	}
 	if opts.dryRun {
-		projected := &model.Feature{
-			RepoID:      repo.ID,
-			Slug:        slug,
-			Title:       title,
-			Description: description,
-		}
-		return emitDryRun(projected)
+		return emitDryRun(f)
 	}
-	f, err := s.CreateFeature(repo.ID, slug, title, description)
-	if err != nil {
-		return err
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
-		Op: "feature.create", Kind: "feature",
-		TargetID: &f.ID, TargetLabel: f.Slug,
-		Details: f.Title,
-	})
 	return emit(f)
 }
 
@@ -102,16 +91,16 @@ func featureListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List features in the current repo (descriptions are stripped by default; pass --with-description to include them)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStore()
+			c, err := openClient()
 			if err != nil {
 				return err
 			}
-			defer s.Close()
-			repo, err := resolveRepo(s)
+			defer c.Close()
+			repo, err := resolveRepoC(c)
 			if err != nil {
 				return err
 			}
-			fs, err := s.ListFeatures(repo.ID, withDescription)
+			fs, err := c.ListFeatures(context.Background(), repo, withDescription)
 			if err != nil {
 				return err
 			}
@@ -128,28 +117,24 @@ func featureShowCmd() *cobra.Command {
 		Short: "Show a feature with its issues, attachments, and linked documents",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			s, err := openStore()
+			c, err := openClient()
 			if err != nil {
 				return err
 			}
-			defer s.Close()
-			repo, err := resolveRepo(s)
+			defer c.Close()
+			repo, err := resolveRepoC(c)
 			if err != nil {
 				return err
 			}
-			f, err := s.GetFeatureBySlug(repo.ID, args[0])
+			view, err := c.ShowFeature(context.Background(), repo, args[0])
 			if err != nil {
 				return err
 			}
-			issues, err := s.ListIssues(store.IssueFilter{RepoID: &repo.ID, FeatureID: &f.ID})
-			if err != nil {
-				return err
-			}
-			docs, err := s.ListDocumentsLinkedToFeature(f.ID)
-			if err != nil {
-				return err
-			}
-			return emit(&featureView{Feature: f, Issues: issues, Documents: docs})
+			return emit(&featureView{
+				Feature:   view.Feature,
+				Issues:    view.Issues,
+				Documents: view.Documents,
+			})
 		},
 	}
 }
@@ -224,45 +209,22 @@ func applyFeatureEdit(slug string, tPtr, dPtr *string) error {
 	if tPtr == nil && dPtr == nil {
 		return fmt.Errorf("nothing to update; pass title and/or description")
 	}
-	s, err := openStore()
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	repo, err := resolveRepo(s)
+	defer c.Close()
+	repo, err := resolveRepoC(c)
 	if err != nil {
 		return err
 	}
-	f, err := s.GetFeatureBySlug(repo.ID, slug)
+	updated, err := c.UpdateFeature(context.Background(), repo, slug, tPtr, dPtr, opts.dryRun)
 	if err != nil {
 		return err
 	}
 	if opts.dryRun {
-		projected := *f
-		if tPtr != nil {
-			projected.Title = *tPtr
-		}
-		if dPtr != nil {
-			projected.Description = *dPtr
-		}
-		return emitDryRun(&projected)
+		return emitDryRun(updated)
 	}
-	if err := s.UpdateFeature(f.ID, tPtr, dPtr); err != nil {
-		return err
-	}
-	updated, err := s.GetFeatureByID(f.ID)
-	if err != nil {
-		return err
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
-		Op: "feature.update", Kind: "feature",
-		TargetID: &updated.ID, TargetLabel: updated.Slug,
-		Details: updatedFieldList(map[string]bool{
-			"title":       tPtr != nil,
-			"description": dPtr != nil,
-		}),
-	})
 	return emit(updated)
 }
 
@@ -301,45 +263,28 @@ func featureRmCmd() *cobra.Command {
 }
 
 func removeFeature(slug string) error {
-	s, err := openStore()
+	c, err := openClient()
 	if err != nil {
 		return err
 	}
-	defer s.Close()
-	repo, err := resolveRepo(s)
+	defer c.Close()
+	repo, err := resolveRepoC(c)
 	if err != nil {
 		return err
 	}
-	f, err := s.GetFeatureBySlug(repo.ID, slug)
+	deleted, preview, err := c.DeleteFeature(context.Background(), repo, slug, opts.dryRun)
 	if err != nil {
 		return err
 	}
 	if opts.dryRun {
-		issues, err := s.ListIssues(store.IssueFilter{RepoID: &repo.ID, FeatureID: &f.ID})
-		if err != nil {
-			return err
-		}
-		docs, err := s.ListDocumentsLinkedToFeature(f.ID)
-		if err != nil {
-			return err
-		}
 		return emitDryRun(&featureDeletePreview{
-			Feature:           f,
-			WouldDelete:       true,
-			IssuesUnlinked:    len(issues),
-			DocumentLinks:     len(docs),
+			Feature:        preview.Feature,
+			WouldDelete:    preview.WouldDelete,
+			IssuesUnlinked: preview.IssuesUnlinked,
+			DocumentLinks:  preview.DocumentLinks,
 		})
 	}
-	if err := s.DeleteFeature(f.ID); err != nil {
-		return err
-	}
-	recordOp(s, model.HistoryEntry{
-		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
-		Op: "feature.delete", Kind: "feature",
-		TargetID: &f.ID, TargetLabel: f.Slug,
-		Details: f.Title,
-	})
-	return ok("feature %s deleted", f.Slug)
+	return ok("feature %s deleted", deleted.Slug)
 }
 
 // featureDeletePreview is the dry-run payload for `mk feature rm`.

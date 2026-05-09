@@ -172,31 +172,6 @@ func (e *notFoundError) Unwrap() error { return store.ErrNotFound }
 // Stub implementations follow. Real bodies arrive verb-by-verb in
 // later commits.
 
-func (c *remoteClient) ListFeatures(ctx context.Context, repo *model.Repo, withDescription bool) ([]*model.Feature, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) GetFeatureBySlug(ctx context.Context, repo *model.Repo, slug string) (*model.Feature, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) GetFeatureByID(ctx context.Context, repo *model.Repo, id int64) (*model.Feature, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) CreateFeature(ctx context.Context, repo *model.Repo, in inputs.FeatureAddInput, dryRun bool) (*model.Feature, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) UpdateFeature(ctx context.Context, repo *model.Repo, slug string, title, description *string, dryRun bool) (*model.Feature, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) DeleteFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Feature, *FeatureDeletePreview, error) {
-	return nil, nil, errors.New("not implemented")
-}
-func (c *remoteClient) ShowFeature(ctx context.Context, repo *model.Repo, slug string) (*FeatureView, error) {
-	return nil, errors.New("not implemented")
-}
-func (c *remoteClient) PlanFeature(ctx context.Context, repo *model.Repo, slug string) (*PlanView, error) {
-	return nil, errors.New("not implemented")
-}
-
 func (c *remoteClient) ResolveIssueKey(ctx context.Context, repo *model.Repo, key string) (string, error) {
 	return "", errors.New("not implemented")
 }
