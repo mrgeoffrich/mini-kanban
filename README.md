@@ -13,6 +13,7 @@ A local-first, single-binary issue tracker designed to be driven equally well by
 - **TUI (`mk tui`)** — bubbletea-based full-screen kanban for human review.
 - **Audit log** — every mutation is recorded with an actor name (`--user <name>`); 60-day retention.
 - **REST API (`mk api`)** — same operations over HTTP for non-shell callers (web UIs, IDE plugins, long-running agents).
+- **CLI client mode (`--remote` / `MK_REMOTE`)** — point the CLI at an `mk api` server instead of the local DB; every retargetable verb works against either backend.
 
 ## Install
 
@@ -84,6 +85,25 @@ Every mutation accepts `?dry_run=true` (or `X-Dry-Run: 1`); set
 `X-Actor: <name>` so audit rows attribute correctly (and to claim
 work — `POST /features/{slug}/next` requires it). See
 `docs/rest-api-design.md` for the full route table.
+
+### CLI client mode
+
+The same `mk` binary can drive a remote `mk api` server instead of the
+local DB. Set `--remote <url>` (or `MK_REMOTE`) and `--token <secret>`
+(or `MK_API_TOKEN`):
+
+    MK_REMOTE=http://team-mk:5320 MK_API_TOKEN=$T mk issue list
+    mk --remote http://team-mk:5320 issue add "Login broken" --feature auth
+
+Every read and mutating verb works in remote mode with the same flags,
+positionals, and JSON output as local mode. Audit rows are written by
+the API server, not the client. A small set of filesystem-touching
+verbs stay local-only and error clearly when `MK_REMOTE` is set:
+`mk init`, `mk install-skill`, `mk doc add --from-path`, `mk doc upsert
+--from-path`, `mk doc export`, and `mk tui`. Use the new
+`mk doc download <filename>` (writes to stdout, or `--to <path>`) when
+you need a doc body locally in remote mode. See
+`docs/cli-client-mode.md` for the full design.
 
 ## AI-agent integration
 

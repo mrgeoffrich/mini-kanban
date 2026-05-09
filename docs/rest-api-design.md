@@ -321,78 +321,48 @@ These are mechanical moves. They land in PR 1 alongside the scaffolding so the A
 - `go test ./...` passes including the new HTTP-level tests.
 - README.md mentions `mk api` in the "Quick start" / "AI-agent integration" sections.
 
-## 14. Phase 6 stub: CLI client mode
+## 14. Phase 6: CLI client mode (implemented)
 
-Forward-looking. Out of scope for Phases 1–5 but recorded here so we don't lose the thread, and so Phase 1–5 design decisions stay aligned.
+Phase 6 retargets every CLI verb through a small `Client` interface
+with two backends — `localClient` (SQLite, the original behaviour)
+and `remoteClient` (HTTP against `mk api`). Selection is per-invocation
+via `--remote` / `MK_REMOTE`, defaulting to local. See
+[`cli-client-mode.md`](cli-client-mode.md) for the architecture and
+verb-by-verb mapping.
 
-### Goal
+### Decisions made during implementation
 
-Let the same `mk` binary drive *either* the local SQLite DB *or* a remote `mk api` instance, selected per invocation:
-
-```
-mk issue add "Fix login" --feature auth                  # local SQLite (today)
-MK_REMOTE=http://team-mk:5320 mk issue add "Fix login" --feature auth   # POSTs to /repos/{prefix}/issues
-mk --remote http://team-mk:5320 issue list               # GETs /repos/{prefix}/issues
-```
-
-Default behaviour is unchanged — no `--remote` / `MK_REMOTE` ⇒ local-mode. This keeps the local-first promise intact for solo users.
-
-### Why it works without rework
-
-Phases 1–5 already establish the contract that makes this trivial:
-
-- **Same input structs.** Every mutating CLI verb already builds an `inputs.*Input`. Remote mode marshals the same struct to JSON and POSTs to the corresponding endpoint.
-- **Same JSON output shapes.** Read endpoints return exactly what `mk <verb> -o json` emits today. Remote mode decodes back into the model types and the existing text renderer keeps working.
-- **Same auth/actor mapping.** `--user` ↔ `X-Actor`, `--token` / `MK_API_TOKEN` ↔ `Authorization: Bearer`.
-
-### Architecture sketch
-
-Introduce a small `internal/client` package with a `Client` interface that mirrors the verbs the CLI uses today (`CreateIssue`, `ListIssues`, `SetState`, …). Two implementations:
-
-- `localClient` — thin wrapper over `*store.Store` that ALSO calls `recordOp` (i.e. exactly what the CLI does inline today).
-- `remoteClient` — `*http.Client` that marshals inputs and unmarshals outputs.
-
-CLI handlers stop calling `s.CreateIssue(...)` directly and call `c.CreateIssue(...)` instead. The selection between local and remote is made once at command boot in `internal/cli/context.go`.
-
-The remote client respects `--dry-run` by setting `?dry_run=true` and surfacing the projected entity to the existing `emit` / `emitDryRun` path.
-
-### Commands that cannot be re-targeted
-
-These touch the developer's own filesystem or terminal and have no remote analogue. They stay local-only and error if `MK_REMOTE` is set:
-
-| Command | Reason |
-|---|---|
-| `mk init` | CWD git detection |
-| `mk install-skill` | Writes `.claude/skills/mk/SKILL.md` to the local repo |
-| `mk doc add --from-path` | Reads a local file (use `--description-file` / `-` over the API equivalent — body upload) |
-| `mk doc export --to-path` | Writes a local file (over the API: `GET /documents/{filename}/download` and pipe to disk) |
-| `mk tui` | Long-lived UI that today opens the DB directly; remoting is a much bigger lift |
-| `mk schema *` | Could go either way; default to local registry since it's identical |
-
-### CLI surface
-
-| Flag / env | Default | Effect |
+| # | Decision | Rationale |
 |---|---|---|
-| `--remote <url>` | unset | Switch to remote mode for this invocation |
-| `MK_REMOTE` | unset | Same, via env |
-| `--token <secret>` | unset | Bearer for the remote API |
-| `MK_API_TOKEN` | unset | Same, via env |
-| `--db <path>` | `~/.mini-kanban/db.sqlite` | Ignored when remote mode is active |
-| `--user <name>` | OS user | Sent as `X-Actor` in remote mode |
+| 1 | One `Client` interface in `internal/client` | Shared surface keeps drift between the two backends down to the methods themselves. Audit-stamping is **inside** the local backend; the remote backend never calls `RecordHistory` (the server does). |
+| 2 | `Mode() string` on every client | Local-only verbs branch on this rather than reflecting on the concrete type. Cleaner than a `(*localClient)` cast and survives future backends. |
+| 3 | Local backend keeps the existing in-memory dry-run projections; remote backend appends `?dry_run=true` and trusts the server | Two different sources of truth, but each one is the simplest shape for that backend. No third "shared dry-run library". |
+| 4 | Auto-register on first use happens in `EnsureRepo` on both backends | Local writes the row + audit inline; remote does CWD detection client-side then `POST /repos`. `mk init` itself stays local-only as the explicit-form companion (it's not the only place repos are created). |
+| 5 | Issue keys: bare numbers (`42`) resolve client-side via `ResolveIssueKey(repo, key)`; canonical `PREFIX-N` is what hits the wire | Server URLs are by canonical key only; the bare-number shortcut is a CLI ergonomic. Resolved at the edge so the API surface stays simple. |
+| 6 | View shapes (`IssueView`, `FeatureView`, `IssueBrief`, etc.) duplicated between `internal/cli`, `internal/api`, and `internal/client` | Each surface owns its private definitions to avoid an import cycle. JSON tags are identical so the wire format is byte-for-byte equivalent; field-by-field copy bridges the small drift at the CLI's text-render edge. |
+| 7 | DELETE-with-body endpoints (`DELETE /relations`, `DELETE /tags`, `DELETE /documents/{filename}/links`, `DELETE /pull-requests`) use a custom `doBody` helper because Go's `net/http` allows DELETE bodies but `c.do` skipped serialising the body when method was DELETE | One small helper, no public API change. |
+| 8 | New `mk doc download` verb wraps `GET /documents/{filename}/download` | Replaces the local-only `mk doc export` for remote-mode callers. Local mode also implements it (just reads + writes), so behaviour is uniform. |
+| 9 | `mk status` and `mk schema *` stay local-direct in remote mode | No `/status` endpoint exists, and the schema registry is identical. `mk status` is fundamentally about "what does THIS machine have?", so reaching across to the server would be wrong anyway. |
+| 10 | Every mutation method takes `dryRun bool` so the CLI handler doesn't have to branch on backend | The handler reads `opts.dryRun` once and passes it through; each backend's method does the right thing internally. |
 
-### Honest tradeoffs
+### Local-only verbs
 
-- **Two code paths to maintain.** The `Client` interface keeps drift down, but the test matrix doubles for any verb that has subtle behaviour.
-- **Latency.** Local will always beat HTTP. For tight agent loops (`mk issue next` polled every few seconds) this is fine; for batch operations users may notice.
-- **Text-render parity.** Remote mode goes Go → JSON → Go before rendering vs. local's direct Go path. Equivalent in practice but a possible source of sneaky drift bugs.
-- **Auth UX.** Token storage / prompting / `~/.mini-kanban/config.toml` need a small design pass before this PR lands.
+When `--remote` / `MK_REMOTE` is set, these verbs short-circuit with a
+clear error rather than touching the local DB:
 
-### Sequencing
+| Verb | Why local-only |
+|---|---|
+| `mk init` | Auto-detects CWD git state; use `POST /repos` instead. |
+| `mk install-skill` | Writes `.claude/skills/mk/SKILL.md` to the local repo. |
+| `mk doc add --from-path`, `mk doc upsert --from-path` | Read from the client's filesystem. Use `--content`/`--content-file` instead. |
+| `mk doc export` | Writes to the client filesystem. Use `mk doc download` and pipe to disk. |
+| `mk tui` | Long-lived UI talking to SQLite directly. |
 
-Phase 6 is a separate PR after Phase 5. Nothing in Phases 1–5 needs to change to enable it; the design is already aligned. When ready, the planning agent should produce a Phase 6 plan that covers:
+### Tests
 
-1. The `internal/client` package + interface + two implementations.
-2. CLI command refactor to call the client (one verb at a time, behind the gate of "is remote?" selection).
-3. Configurable token / URL persistence (likely a small config file).
-4. Tests for round-trip equivalence between local and remote modes for every retargetable verb.
-5. Explicit error messages for the local-only commands when `MK_REMOTE` is set.
+`internal/client/roundtrip_test.go` drives both backends against the
+same temp-DB SQLite (the remote leg via `httptest.NewServer` wrapping
+`api.New`) and asserts identical state, audit-log parity, dry-run
+no-op semantics, and `errors.Is(err, store.ErrNotFound)` working
+through the HTTP envelope. Existing `internal/api/...` and
+`internal/store/...` tests pass unchanged.

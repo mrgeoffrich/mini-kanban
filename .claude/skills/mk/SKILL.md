@@ -831,6 +831,31 @@ Same posture as the CLI's "what we deliberately don't do" — these came up duri
 
 For the full design rationale, the threat model, and the forward-looking "Phase 6: CLI client mode" sketch, see `docs/rest-api-design.md`.
 
+## CLI client mode (`--remote` / `MK_REMOTE`)
+
+The same `mk` binary can drive a remote `mk api` server instead of the local SQLite database, so an agent can use the familiar CLI surface against a shared kanban without changing flags or output format. Set one of:
+
+- `--remote http://host:5320` (per-invocation flag), or
+- `MK_REMOTE=http://host:5320` (env, persists across the shell), and
+- `--token <secret>` / `MK_API_TOKEN=<secret>` if the server enforces auth.
+
+```bash
+MK_REMOTE=http://team-mk:5320 MK_API_TOKEN=$T mk issue list -o json
+mk --remote http://team-mk:5320 issue add "Login broken" --feature auth
+```
+
+In remote mode every read and mutating verb above behaves exactly as it does locally — same flags, same JSON output, same `--dry-run` semantics, same `--user` actor. The client transparently translates each verb into the corresponding HTTP route from the table above. Audit rows are written by the API server, not the client.
+
+Verbs that touch the developer's local filesystem stay local-only and error clearly when `MK_REMOTE` is set:
+
+- `mk init` — auto-detects CWD; use `POST /repos` (or run `mk init` against the local DB) instead.
+- `mk install-skill` — writes `.claude/skills/mk/SKILL.md` locally.
+- `mk doc add --from-path` / `mk doc upsert --from-path` — read from the client filesystem; pass `--content`/`--content-file` instead.
+- `mk doc export` (`--to-path` and `--to`) — writes to the client filesystem; use `mk doc download <filename>` (writes to stdout, or `--to <path>`) to get the body locally over HTTP.
+- `mk tui` — opens the local DB directly.
+
+`mk schema *` and `mk status` also stay local-direct (no remote endpoint exists in v1; the registry / stats are local concerns).
+
 ## Gotchas
 
 - **Never run `mk` outside a git repo** when a command needs the current repo — it hard-errors with "not inside a git repository". `cd` first.
