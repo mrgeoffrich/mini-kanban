@@ -73,3 +73,15 @@ type PullRequest struct {
 	URL       string    `json:"url"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// SyncState records that a record (issue/feature/document/comment/repo)
+// has participated in a git-backed sync pass. Presence-of-row is the
+// "previously synced" flag — absence means "local-only, never
+// exported". The hash is the canonical sync-side content hash at the
+// time of the last sync, used to detect on-disk edits between runs.
+type SyncState struct {
+	UUID           string    `json:"uuid"`
+	Kind           string    `json:"kind"`
+	LastSyncedAt   time.Time `json:"last_synced_at"`
+	LastSyncedHash string    `json:"last_synced_hash"`
+}
