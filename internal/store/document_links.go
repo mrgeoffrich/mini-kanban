@@ -98,6 +98,46 @@ func (s *Store) getLink(documentID int64, t LinkTarget) (*model.DocumentLink, er
 	return scanDocumentLink(s.DB.QueryRow(q, args...))
 }
 
+// ReplaceDocumentLinks clears every link row for documentID and
+// re-creates the given set. Used by the sync importer to apply the
+// `links:` block from doc.yaml in one shot. Each LinkTarget is
+// validated for "exactly one of issue or feature".
+func (s *Store) ReplaceDocumentLinks(documentID int64, links []DocumentLinkSpec) error {
+	for _, l := range links {
+		if err := l.Target.check(); err != nil {
+			return err
+		}
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM document_links WHERE document_id = ?`, documentID); err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(
+		`INSERT INTO document_links (document_id, issue_id, feature_id, description) VALUES (?, ?, ?, ?)`,
+	)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, l := range links {
+		if _, err := stmt.Exec(documentID, nullableInt(l.Target.IssueID), nullableInt(l.Target.FeatureID), l.Description); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// DocumentLinkSpec is the import-side description of one link: the
+// (issue|feature) target plus an optional description.
+type DocumentLinkSpec struct {
+	Target      LinkTarget
+	Description string
+}
+
 // ListDocumentLinks returns every link for a single document, both to issues
 // and to features.
 func (s *Store) ListDocumentLinks(documentID int64) ([]*model.DocumentLink, error) {
