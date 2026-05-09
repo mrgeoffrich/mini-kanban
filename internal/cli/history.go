@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrgeoffrich/mini-kanban/internal/model"
 	"github.com/mrgeoffrich/mini-kanban/internal/store"
 	"github.com/mrgeoffrich/mini-kanban/internal/timeparse"
 )
@@ -40,11 +42,11 @@ Time inputs:
 			if sinceStr != "" && fromStr != "" {
 				return fmt.Errorf("--since and --from are mutually exclusive")
 			}
-			s, err := openStore()
+			c, err := openClient()
 			if err != nil {
 				return err
 			}
-			defer s.Close()
+			defer c.Close()
 
 			f := store.HistoryFilter{
 				Limit:       limit,
@@ -54,12 +56,12 @@ Time inputs:
 				Kind:        kindFilter,
 				OldestFirst: oldestFirst,
 			}
+			var repo *model.Repo
 			if !allRepos {
-				repo, err := resolveRepo(s)
+				repo, err = resolveRepoC(c)
 				if err != nil {
 					return err
 				}
-				f.RepoID = &repo.ID
 			}
 			if sinceStr != "" {
 				d, err := timeparse.Lookback(sinceStr)
@@ -86,7 +88,7 @@ Time inputs:
 			if f.From != nil && f.To != nil && f.To.Before(*f.From) {
 				return fmt.Errorf("--to (%s) must not be before --from (%s)", f.To.Local(), f.From.Local())
 			}
-			entries, err := s.ListHistory(f)
+			entries, err := c.ListHistory(context.Background(), repo, f)
 			if err != nil {
 				return err
 			}

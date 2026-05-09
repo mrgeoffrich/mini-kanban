@@ -34,59 +34,6 @@ func newIssueCmd() *cobra.Command {
 	return cmd
 }
 
-// resolveIssueByKeyC resolves "MINI-42" or just "42" via the client. The
-// repo argument supplies the implicit current repo for bare-number
-// references; pass nil only when you know the input is canonical.
-func resolveIssueByKeyC(c client.Client, repo *model.Repo, key string) (*model.Issue, error) {
-	return c.GetIssueByKey(context.Background(), repo, key)
-}
-
-// resolveIssueKeyStrictC requires canonical PREFIX-N. Used by the JSON
-// path where bare numbers shouldn't sneak in.
-func resolveIssueKeyStrictC(c client.Client, key string) (*model.Issue, error) {
-	key = strings.TrimSpace(key)
-	if !strings.Contains(key, "-") {
-		return nil, fmt.Errorf("issue key %q must be canonical (e.g. \"MINI-42\")", key)
-	}
-	return c.GetIssueByKey(context.Background(), nil, key)
-}
-
-// resolveIssueByKey is the store-level shim retained while the rest of
-// the issue-touching commands are still on *store.Store. Removed once
-// every caller has migrated to resolveIssueByKeyC.
-func resolveIssueByKey(s *store.Store, key string) (*model.Issue, error) {
-	key = strings.TrimSpace(key)
-	if !strings.Contains(key, "-") {
-		repo, err := resolveRepo(s)
-		if err != nil {
-			return nil, err
-		}
-		var n int64
-		if _, err := fmt.Sscanf(key, "%d", &n); err != nil {
-			return nil, fmt.Errorf("invalid issue reference %q", key)
-		}
-		return s.GetIssueByKey(repo.Prefix, n)
-	}
-	prefix, num, err := store.ParseIssueKey(key)
-	if err != nil {
-		return nil, err
-	}
-	return s.GetIssueByKey(prefix, num)
-}
-
-// resolveIssueKeyStrict is the store-level strict variant; same retention
-// strategy as resolveIssueByKey.
-func resolveIssueKeyStrict(s *store.Store, key string) (*model.Issue, error) {
-	key = strings.TrimSpace(key)
-	if !strings.Contains(key, "-") {
-		return nil, fmt.Errorf("issue key %q must be canonical (e.g. \"MINI-42\")", key)
-	}
-	prefix, num, err := store.ParseIssueKey(key)
-	if err != nil {
-		return nil, err
-	}
-	return s.GetIssueByKey(prefix, num)
-}
 
 func issueAddCmd() *cobra.Command {
 	var (
