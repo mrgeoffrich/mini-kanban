@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/mrgeoffrich/mini-kanban/internal/identity"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
-	"github.com/mrgeoffrich/mini-kanban/internal/sync"
 )
 
 var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
@@ -41,7 +41,7 @@ func (s *Store) CreateFeature(repoID int64, slug, title, description string) (*m
 	}
 	res, err := s.DB.Exec(
 		`INSERT INTO features (uuid, repo_id, slug, title, description) VALUES (?, ?, ?, ?, ?)`,
-		sync.New(), repoID, slug, title, description,
+		identity.New(), repoID, slug, title, description,
 	)
 	if err != nil {
 		return nil, err

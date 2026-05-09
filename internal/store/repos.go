@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
-	"github.com/mrgeoffrich/mini-kanban/internal/sync"
+	"github.com/mrgeoffrich/mini-kanban/internal/identity"
 )
 
 var ErrNotFound = errors.New("not found")
@@ -16,7 +16,7 @@ const repoCols = `id, uuid, prefix, name, path, remote_url, next_issue_number, c
 func (s *Store) CreateRepo(prefix, name, path, remoteURL string) (*model.Repo, error) {
 	res, err := s.DB.Exec(
 		`INSERT INTO repos (uuid, prefix, name, path, remote_url) VALUES (?, ?, ?, ?, ?)`,
-		sync.New(), prefix, name, path, remoteURL,
+		identity.New(), prefix, name, path, remoteURL,
 	)
 	if err != nil {
 		return nil, err

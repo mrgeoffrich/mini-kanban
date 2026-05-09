@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/mrgeoffrich/mini-kanban/internal/identity"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
-	"github.com/mrgeoffrich/mini-kanban/internal/sync"
 )
 
 func (s *Store) CreateComment(issueID int64, author, body string) (*model.Comment, error) {
@@ -20,7 +20,7 @@ func (s *Store) CreateComment(issueID int64, author, body string) (*model.Commen
 	}
 	res, err := s.DB.Exec(
 		`INSERT INTO comments (uuid, issue_id, author, body) VALUES (?, ?, ?, ?)`,
-		sync.New(), issueID, author, body,
+		identity.New(), issueID, author, body,
 	)
 	if err != nil {
 		return nil, err

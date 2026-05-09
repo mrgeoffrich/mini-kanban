@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/mrgeoffrich/mini-kanban/internal/identity"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
-	"github.com/mrgeoffrich/mini-kanban/internal/sync"
 )
 
 var issueKeyRe = regexp.MustCompile(`^([A-Za-z0-9]{4})-(\d+)$`)
@@ -55,7 +55,7 @@ func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description s
 
 	res, err := tx.Exec(
 		`INSERT INTO issues (uuid, repo_id, number, feature_id, title, description, state) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		sync.New(), repoID, num, nullableInt(featureID), title, description, string(state),
+		identity.New(), repoID, num, nullableInt(featureID), title, description, string(state),
 	)
 	if err != nil {
 		return nil, err

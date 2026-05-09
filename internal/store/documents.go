@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mrgeoffrich/mini-kanban/internal/identity"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
-	"github.com/mrgeoffrich/mini-kanban/internal/sync"
 )
 
 var ErrDocumentExists = errors.New("a document with that filename already exists in this repo")
@@ -23,7 +23,7 @@ func (s *Store) CreateDocument(repoID int64, filename string, t model.DocumentTy
 	}
 	res, err := s.DB.Exec(
 		`INSERT INTO documents (uuid, repo_id, filename, type, content, size_bytes, source_path) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		sync.New(), repoID, filename, string(t), content, len(content), sourcePath,
+		identity.New(), repoID, filename, string(t), content, len(content), sourcePath,
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {

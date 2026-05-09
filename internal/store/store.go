@@ -10,7 +10,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/mrgeoffrich/mini-kanban/internal/sync"
+	"github.com/mrgeoffrich/mini-kanban/internal/identity"
 )
 
 // HistoryRetention bounds how long audit-log entries are kept. Anything
@@ -207,7 +207,7 @@ func backfillUUIDs(db *sql.DB, table string) error {
 	}
 	defer stmt.Close()
 	for _, id := range ids {
-		if _, err := stmt.Exec(sync.New(), id); err != nil {
+		if _, err := stmt.Exec(identity.New(), id); err != nil {
 			return err
 		}
 	}
