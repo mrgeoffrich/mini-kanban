@@ -28,6 +28,9 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("POST /repos", d.handleReposCreate)
 	mux.HandleFunc("GET /repos/{prefix}", d.handleReposShow)
 
+	mux.HandleFunc("GET /repos/{prefix}/features", d.handleFeaturesList)
+	mux.HandleFunc("GET /repos/{prefix}/features/{slug}", d.handleFeatureShow)
+
 	mux.HandleFunc("GET /repos/{prefix}/issues", d.handleIssuesList)
 	mux.HandleFunc("POST /repos/{prefix}/issues", d.handleIssueCreate)
 	mux.HandleFunc("GET /repos/{prefix}/issues/{key}", d.handleIssueShow)

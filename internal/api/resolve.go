@@ -49,3 +49,21 @@ func resolveIssueOnRepo(w http.ResponseWriter, r *http.Request, s *store.Store, 
 	}
 	return iss, true
 }
+
+// resolveFeatureOnRepo pulls {slug} from the URL and looks up the feature
+// scoped to the given repo. GetFeatureBySlug already filters by repo_id, so
+// a slug that exists in another repo surfaces as 404 here.
+func resolveFeatureOnRepo(w http.ResponseWriter, r *http.Request, s *store.Store, repo *model.Repo) (*model.Feature, bool) {
+	slug := r.PathValue("slug")
+	feat, err := s.GetFeatureBySlug(repo.ID, slug)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", err.Error(), nil)
+			return nil, false
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return nil, false
+	}
+	return feat, true
+}
