@@ -1,11 +1,7 @@
 package client
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -89,7 +85,7 @@ func (c *remoteClient) UnlinkRelation(ctx context.Context, repo *model.Repo, in 
 	if dryRun {
 		q.Set("dry_run", "true")
 		var preview RelationDeletePreview
-		if err := c.doBody(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/relations", q, in, &preview); err != nil {
+		if err := c.do(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/relations", q, in, &preview); err != nil {
 			return nil, 0, err
 		}
 		return &preview, 0, nil
@@ -97,67 +93,10 @@ func (c *remoteClient) UnlinkRelation(ctx context.Context, repo *model.Repo, in 
 	var resp struct {
 		Removed int64 `json:"removed"`
 	}
-	if err := c.doBody(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/relations", nil, in, &resp); err != nil {
+	if err := c.do(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/relations", nil, in, &resp); err != nil {
 		return nil, 0, err
 	}
 	return nil, resp.Removed, nil
-}
-
-// doBody is like do() but always sends a body even for DELETE — net/http
-// handles that fine but the c.do() helper picks Method and body handling
-// based on whether `in` is nil. The relation/tag delete endpoints take
-// JSON bodies, so we can't just call c.do with in=nil.
-func (c *remoteClient) doBody(ctx context.Context, method, path string, query url.Values, in any, out any) error {
-	u := *c.base
-	setURLPath(&u, path)
-	if query != nil {
-		u.RawQuery = query.Encode()
-	}
-	buf, err := json.Marshal(in)
-	if err != nil {
-		return fmt.Errorf("marshal request: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), bytes.NewReader(buf))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-	if c.actor != "" {
-		req.Header.Set("X-Actor", c.actor)
-	}
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read response: %w", err)
-	}
-	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		if out == nil || len(raw) == 0 {
-			return nil
-		}
-		if err := json.Unmarshal(raw, out); err != nil {
-			return fmt.Errorf("decode response: %w", err)
-		}
-		return nil
-	}
-	herr := &HTTPError{Status: resp.StatusCode}
-	if len(raw) > 0 {
-		var env errorBody
-		if jerr := json.Unmarshal(raw, &env); jerr == nil {
-			herr.Code = env.Code
-			herr.Message = env.Error
-			herr.Details = env.Details
-		} else {
-			herr.Message = strings.TrimSpace(string(raw))
-		}
-	}
-	return wrapStoreError(herr)
 }
 
 // ----- PRs -----
@@ -207,12 +146,12 @@ func (c *remoteClient) DetachPR(ctx context.Context, repo *model.Repo, key, prUR
 		q := url.Values{}
 		q.Set("dry_run", "true")
 		var preview PRDetachPreview
-		if err := c.doBody(ctx, http.MethodDelete, "/repos/"+prefix+"/issues/"+canonical+"/pull-requests", q, body, &preview); err != nil {
+		if err := c.do(ctx, http.MethodDelete, "/repos/"+prefix+"/issues/"+canonical+"/pull-requests", q, body, &preview); err != nil {
 			return nil, 0, err
 		}
 		return &preview, 0, nil
 	}
-	if err := c.doBody(ctx, http.MethodDelete, "/repos/"+prefix+"/issues/"+canonical+"/pull-requests", nil, body, nil); err != nil {
+	if err := c.do(ctx, http.MethodDelete, "/repos/"+prefix+"/issues/"+canonical+"/pull-requests", nil, body, nil); err != nil {
 		return nil, 0, err
 	}
 	return nil, 1, nil
@@ -246,7 +185,7 @@ func (c *remoteClient) tagMutate(ctx context.Context, repo *model.Repo, key stri
 		}
 	} else {
 		body := inputs.TagRmInput{IssueKey: canonical, Tags: tags}
-		if err := c.doBody(ctx, http.MethodDelete, "/repos/"+prefix+"/issues/"+canonical+"/tags", q, body, &out); err != nil {
+		if err := c.do(ctx, http.MethodDelete, "/repos/"+prefix+"/issues/"+canonical+"/tags", q, body, &out); err != nil {
 			return nil, err
 		}
 	}

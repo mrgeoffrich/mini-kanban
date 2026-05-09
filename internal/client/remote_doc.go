@@ -159,12 +159,12 @@ func (c *remoteClient) UnlinkDocument(ctx context.Context, repo *model.Repo, in 
 	if dryRun {
 		q.Set("dry_run", "true")
 		var preview DocumentUnlinkPreview
-		if err := c.doBody(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/documents/"+url.PathEscape(in.Filename)+"/links", q, in, &preview); err != nil {
+		if err := c.do(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/documents/"+url.PathEscape(in.Filename)+"/links", q, in, &preview); err != nil {
 			return nil, 0, err
 		}
 		return &preview, 0, nil
 	}
-	if err := c.doBody(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/documents/"+url.PathEscape(in.Filename)+"/links", nil, in, nil); err != nil {
+	if err := c.do(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/documents/"+url.PathEscape(in.Filename)+"/links", nil, in, nil); err != nil {
 		return nil, 0, err
 	}
 	return nil, 1, nil
