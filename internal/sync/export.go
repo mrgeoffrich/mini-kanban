@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
+	"github.com/mrgeoffrich/mini-kanban/internal/store"
 )
 
 // ExportResult is the structured summary of one Export pass — what was
@@ -48,7 +49,7 @@ func (e *Engine) Export(ctx context.Context, target string) (*ExportResult, erro
 	// principle cross repos (the FK is to issues.id, no repo filter),
 	// so we need every issue in scope to resolve the {label, uuid}
 	// pairs the schema requires.
-	allIssues, err := e.Store.ListIssues(IssueFilterArg{
+	allIssues, err := e.Store.ListIssues(store.IssueFilter{
 		AllRepos:           true,
 		IncludeDescription: false, // we re-fetch with description per-repo below
 	})
@@ -122,7 +123,7 @@ func (e *Engine) exportRepo(w *exportWriter, repo *model.Repo, issueByID map[int
 	// because the global `allIssues` map dropped descriptions to keep
 	// it lean.
 	id := repo.ID
-	issues, err := e.Store.ListIssues(IssueFilterArg{
+	issues, err := e.Store.ListIssues(store.IssueFilter{
 		RepoID:             &id,
 		IncludeDescription: true,
 	})
@@ -140,7 +141,7 @@ func (e *Engine) exportRepo(w *exportWriter, repo *model.Repo, issueByID map[int
 	}
 
 	// Documents.
-	docs, err := e.Store.ListDocuments(DocumentFilterArg{RepoID: repo.ID})
+	docs, err := e.Store.ListDocuments(store.DocumentFilter{RepoID: repo.ID})
 	if err != nil {
 		return fmt.Errorf("list documents: %w", err)
 	}
@@ -385,7 +386,7 @@ func emitPRs(prs []*model.PullRequest) Node {
 // The map structure is fixed: every kind always appears, with an empty
 // list when there are no edges of that kind. This keeps the schema
 // predictable for downstream consumers.
-func emitRelations(rel *IssueRelations, uuidByKey map[string]string) Node {
+func emitRelations(rel *store.IssueRelations, uuidByKey map[string]string) Node {
 	buckets := map[model.RelationType][]Node{
 		model.RelBlocks:      {},
 		model.RelRelatesTo:   {},
