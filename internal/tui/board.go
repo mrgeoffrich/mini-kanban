@@ -245,11 +245,17 @@ func (b *boardView) refreshSelection() {
 		b.attachErr = nil
 		return
 	}
+	// ListIssues omits the heavy description column; re-fetch the full row
+	// so the preview pane and overlay can render it.
+	full, err := b.store.GetIssueByID(iss.ID)
+	if err != nil {
+		full = iss
+	}
 	if b.selected != nil && b.selected.ID == iss.ID {
-		b.selected = iss
+		b.selected = full
 		return
 	}
-	b.selected = iss
+	b.selected = full
 	b.commentMD = nil
 	b.commentsRow = 0
 	b.commentOverlay = false
