@@ -56,6 +56,7 @@ func NewRoot() *cobra.Command {
 		newAPICmd(),
 		newSyncCmd(),
 		newInstallSkillCmd(),
+		newInstallSampleSkillsCmd(),
 		newTUICmd(),
 	)
 	return root

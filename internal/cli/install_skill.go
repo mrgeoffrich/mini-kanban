@@ -17,7 +17,11 @@ func newInstallSkillCmd() *cobra.Command {
 		Short: "Install the mk Claude Code skill into the current repo",
 		Long: `Drop the bundled SKILL.md into <repo-root>/.claude/skills/mk/, creating
 the directory if needed. Overwrites any existing copy with the version
-embedded in this build of mk so re-running picks up doc updates.`,
+embedded in this build of mk so re-running picks up doc updates.
+
+See also: 'mk install-sample-skills' for the flow-level workflow skills
+(file-issue, triage, stand-up, plan-feature) that build on top of this
+canonical reference.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if inRemoteMode() {
 				return fmt.Errorf("mk install-skill: not supported in remote mode (writes the skill file to the local repo); run this verb against the local DB instead")
