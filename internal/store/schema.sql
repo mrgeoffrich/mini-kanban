@@ -1,15 +1,27 @@
 CREATE TABLE IF NOT EXISTS repos (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid               TEXT    NOT NULL,
     prefix             TEXT    NOT NULL UNIQUE,
     name               TEXT    NOT NULL,
-    path               TEXT    NOT NULL UNIQUE,
+    -- path is empty for "phantom" repos (a prefix that exists in the
+    -- sync repo but has no local working tree on this machine yet).
+    -- The UNIQUE-on-path guarantee is preserved by uniq_repos_path
+    -- below, which is partial — multiple phantoms (path = '') can
+    -- coexist while real working trees still get the dedup guarantee.
+    path               TEXT    NOT NULL,
     remote_url         TEXT    NOT NULL DEFAULT '',
     next_issue_number  INTEGER NOT NULL DEFAULT 1,
-    created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Partial UNIQUE on repos.path: still enforces "one repo per local
+-- working tree", but lets phantom repos (path = '') coexist.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_repos_path ON repos(path) WHERE path != '';
 
 CREATE TABLE IF NOT EXISTS features (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid        TEXT    NOT NULL,
     repo_id     INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
     slug        TEXT    NOT NULL,
     title       TEXT    NOT NULL,
@@ -21,6 +33,7 @@ CREATE TABLE IF NOT EXISTS features (
 
 CREATE TABLE IF NOT EXISTS issues (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid        TEXT    NOT NULL,
     repo_id     INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
     number      INTEGER NOT NULL,
     feature_id  INTEGER REFERENCES features(id) ON DELETE SET NULL,
@@ -42,6 +55,7 @@ CREATE INDEX IF NOT EXISTS idx_issues_feature ON issues(feature_id);
 
 CREATE TABLE IF NOT EXISTS comments (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid       TEXT    NOT NULL,
     issue_id   INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
     author     TEXT    NOT NULL,
     body       TEXT    NOT NULL,
@@ -84,6 +98,7 @@ CREATE INDEX IF NOT EXISTS idx_issue_tags_tag ON issue_tags(tag);
 
 CREATE TABLE IF NOT EXISTS documents (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid        TEXT    NOT NULL,
     repo_id     INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
     filename    TEXT    NOT NULL,
     type        TEXT    NOT NULL CHECK (type IN
@@ -151,4 +166,33 @@ CREATE TABLE IF NOT EXISTS tui_settings (
     value      TEXT    NOT NULL DEFAULT '',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (repo_id, key)
+);
+
+-- sync_state tracks records that have participated in a git-backed sync
+-- pass. Presence-of-row means "previously synced"; absence means
+-- "local-only, never exported". CRUD lands in a later phase; the table
+-- exists now so migrate() can add it idempotently to older DBs.
+CREATE TABLE IF NOT EXISTS sync_state (
+    uuid             TEXT    NOT NULL PRIMARY KEY,
+    kind             TEXT    NOT NULL CHECK (kind IN
+                       ('issue','feature','document','comment','repo')),
+    last_synced_at   DATETIME NOT NULL,
+    last_synced_hash TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_state_kind ON sync_state(kind);
+
+-- sync_remotes records, per (canonical) remote URL, where each user has
+-- their sync repo cloned locally. The remote is the shared truth (also
+-- in .mk/config.yaml of every project that uses this sync repo); the
+-- local path is per-machine and lives only in this table.
+--
+-- last_sync_at is bumped at the end of every successful `mk sync`.
+-- It's purely informational today — useful for `mk status`-style
+-- summaries; never used to gate behaviour.
+CREATE TABLE IF NOT EXISTS sync_remotes (
+    remote_url   TEXT NOT NULL PRIMARY KEY,
+    local_path   TEXT NOT NULL,
+    cloned_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_sync_at DATETIME
 );

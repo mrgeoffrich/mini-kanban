@@ -56,6 +56,7 @@ func docTypeStrings() []string {
 
 type Document struct {
 	ID         int64        `json:"id"`
+	UUID       string       `json:"uuid"`
 	RepoID     int64        `json:"repo_id"`
 	Filename   string       `json:"filename"`
 	Type       DocumentType `json:"type"`

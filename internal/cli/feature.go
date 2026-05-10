@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/cli/inputs"
+	"github.com/mrgeoffrich/mini-kanban/internal/client"
 	"github.com/mrgeoffrich/mini-kanban/internal/inputio"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 )
@@ -126,7 +127,10 @@ func featureShowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			view, err := c.ShowFeature(context.Background(), repo, args[0])
+			view, err := retryWithRedirect(repo, "feature", args[0],
+				func(slug string) (*client.FeatureView, error) {
+					return c.ShowFeature(context.Background(), repo, slug)
+				})
 			if err != nil {
 				return err
 			}

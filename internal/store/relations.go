@@ -30,6 +30,47 @@ func (s *Store) DeleteRelation(fromID, toID int64) (int64, error) {
 	return res.RowsAffected()
 }
 
+// ReplaceRelationsForIssue clears every outgoing relation from
+// fromID and re-creates the given set. Used by the sync importer to
+// apply the `relations:` block from issue.yaml to a DB row in one
+// shot. Relations are emitted only as outgoing edges (the
+// other side of every blocks/relates_to/duplicate_of is the
+// inverse), so this matches the export-side discipline.
+//
+// Each entry in `outgoing` is a (toID, type) pair. Self-loops are
+// rejected by the schema's CHECK constraint, so the caller doesn't
+// need to filter them — the underlying INSERT will fail.
+func (s *Store) ReplaceRelationsForIssue(fromID int64, outgoing []OutgoingRelation) error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM issue_relations WHERE from_issue_id = ?`, fromID); err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO issue_relations (from_issue_id, to_issue_id, type) VALUES (?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, r := range outgoing {
+		if _, err := stmt.Exec(fromID, r.ToID, string(r.Type)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// OutgoingRelation is a (toIssueID, type) pair used by
+// ReplaceRelationsForIssue. Stays inside the store package because
+// it carries integer FKs — the sync importer resolves uuids to ids
+// before calling.
+type OutgoingRelation struct {
+	ToID int64
+	Type model.RelationType
+}
+
 // IssueRelations describes the relations involving an issue, with the issue
 // itself as the implicit "self" — outgoing means self -> other.
 type IssueRelations struct {

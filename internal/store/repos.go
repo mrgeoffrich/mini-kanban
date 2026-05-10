@@ -4,16 +4,20 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
+	"github.com/mrgeoffrich/mini-kanban/internal/identity"
 	"github.com/mrgeoffrich/mini-kanban/internal/model"
 )
 
 var ErrNotFound = errors.New("not found")
 
+const repoCols = `id, uuid, prefix, name, path, remote_url, next_issue_number, created_at, updated_at`
+
 func (s *Store) CreateRepo(prefix, name, path, remoteURL string) (*model.Repo, error) {
 	res, err := s.DB.Exec(
-		`INSERT INTO repos (prefix, name, path, remote_url) VALUES (?, ?, ?, ?)`,
-		prefix, name, path, remoteURL,
+		`INSERT INTO repos (uuid, prefix, name, path, remote_url) VALUES (?, ?, ?, ?, ?)`,
+		identity.New(), prefix, name, path, remoteURL,
 	)
 	if err != nil {
 		return nil, err
@@ -23,19 +27,185 @@ func (s *Store) CreateRepo(prefix, name, path, remoteURL string) (*model.Repo, e
 }
 
 func (s *Store) GetRepoByID(id int64) (*model.Repo, error) {
-	return scanRepo(s.DB.QueryRow(`SELECT id, prefix, name, path, remote_url, next_issue_number, created_at FROM repos WHERE id = ?`, id))
+	return scanRepo(s.DB.QueryRow(`SELECT `+repoCols+` FROM repos WHERE id = ?`, id))
 }
 
 func (s *Store) GetRepoByPath(path string) (*model.Repo, error) {
-	return scanRepo(s.DB.QueryRow(`SELECT id, prefix, name, path, remote_url, next_issue_number, created_at FROM repos WHERE path = ?`, path))
+	return scanRepo(s.DB.QueryRow(`SELECT `+repoCols+` FROM repos WHERE path = ?`, path))
 }
 
 func (s *Store) GetRepoByPrefix(prefix string) (*model.Repo, error) {
-	return scanRepo(s.DB.QueryRow(`SELECT id, prefix, name, path, remote_url, next_issue_number, created_at FROM repos WHERE prefix = ?`, prefix))
+	return scanRepo(s.DB.QueryRow(`SELECT `+repoCols+` FROM repos WHERE prefix = ?`, prefix))
+}
+
+// GetRepoByUUID is the canonical sync-side lookup: every record in
+// repo.yaml carries the immutable uuid, so import resolves a synced
+// folder back to its DB row by uuid rather than the (mutable) prefix
+// or path.
+func (s *Store) GetRepoByUUID(uuid string) (*model.Repo, error) {
+	return scanRepo(s.DB.QueryRow(`SELECT `+repoCols+` FROM repos WHERE uuid = ?`, uuid))
+}
+
+// CreatePhantomRepo inserts a row representing a sync-repo prefix
+// that has no local working tree on this machine yet (path = '').
+// Used by the import path when it encounters a repos/<prefix>/
+// folder for which mk has no DB row.
+//
+// The caller supplies the uuid (read from repo.yaml so it survives
+// across machines) and the prefix; remoteURL and name are best-effort
+// hints from the imported file. Validates that no other repo —
+// phantom or real — already owns the prefix, since prefix is still
+// a hard UNIQUE.
+//
+// Phantom rows can later be "upgraded" to real ones via
+// UpgradePhantomRepo when the user runs mk from inside the matching
+// project working tree.
+func (s *Store) CreatePhantomRepo(uuid, prefix, name, remoteURL string) (*model.Repo, error) {
+	if uuid == "" || prefix == "" {
+		return nil, fmt.Errorf("CreatePhantomRepo: uuid and prefix are required")
+	}
+	res, err := s.DB.Exec(
+		`INSERT INTO repos (uuid, prefix, name, path, remote_url) VALUES (?, ?, ?, '', ?)`,
+		uuid, prefix, name, remoteURL,
+	)
+	if err != nil {
+		return nil, err
+	}
+	id, _ := res.LastInsertId()
+	return s.GetRepoByID(id)
+}
+
+// UpgradePhantomRepo populates `path` on a phantom row, turning it
+// into a normal repo bound to a local working tree. Errors if the
+// row isn't actually a phantom (path != '') so a caller hitting this
+// against a real repo finds out loudly rather than silently
+// overwriting the existing path.
+//
+// Bumps updated_at like every other mutation. uuid is the natural
+// key here — CreatePhantomRepo wrote uuid from repo.yaml on import,
+// and the upgrade flow looks it up by the same uuid.
+func (s *Store) UpgradePhantomRepo(uuid, path string) error {
+	if uuid == "" {
+		return fmt.Errorf("UpgradePhantomRepo: uuid is required")
+	}
+	if path == "" {
+		return fmt.Errorf("UpgradePhantomRepo: path must be non-empty (use the local working tree)")
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var existing string
+	if err := tx.QueryRow(`SELECT path FROM repos WHERE uuid = ?`, uuid).Scan(&existing); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if existing != "" {
+		return fmt.Errorf("repo with uuid %s is not phantom (path=%q)", uuid, existing)
+	}
+	if _, err := tx.Exec(
+		`UPDATE repos SET path = ?, updated_at = CURRENT_TIMESTAMP WHERE uuid = ?`,
+		path, uuid,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// UpdateRepoByUUID applies fields from repo.yaml to an existing DB
+// row by uuid. Used by import to apply inbound changes to name,
+// remote_url, next_issue_number. path / id / created_at are
+// client-state and never propagate from disk.
+//
+// Bumps updated_at when at least one field changed. Returns
+// ErrNotFound if no row matches.
+func (s *Store) UpdateRepoByUUID(uuid string, name, remoteURL *string, nextIssueNumber *int64) error {
+	if uuid == "" {
+		return fmt.Errorf("UpdateRepoByUUID: uuid is required")
+	}
+	sets := []string{}
+	args := []any{}
+	if name != nil {
+		sets = append(sets, "name = ?")
+		args = append(args, *name)
+	}
+	if remoteURL != nil {
+		sets = append(sets, "remote_url = ?")
+		args = append(args, *remoteURL)
+	}
+	if nextIssueNumber != nil {
+		sets = append(sets, "next_issue_number = ?")
+		args = append(args, *nextIssueNumber)
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+	sets = append(sets, "updated_at = CURRENT_TIMESTAMP")
+	args = append(args, uuid)
+	res, err := s.DB.Exec(
+		fmt.Sprintf(`UPDATE repos SET %s WHERE uuid = ?`, strings.Join(sets, ", ")),
+		args...,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// RecomputeNextIssueNumber pulls repos.next_issue_number forward to
+// MAX(current value, MAX(issues.number) + 1). Called once per repo
+// at the end of `mk sync import` so a remotely-created MINI-50 (now
+// in DB) doesn't get re-used locally the next time `mk issue create`
+// runs.
+//
+// We deliberately keep the *higher* of the cached counter and the
+// max+1, rather than blindly resetting to max+1: if a repo with
+// next_issue_number = 50 lost all its issues to a remote sweep, we
+// don't want to start handing out MINI-1 again — that namespace is
+// "owned" by the deletions and could collide if someone restores
+// the deleted records on another machine. The high-water mark is
+// the safe lower bound.
+//
+// next_issue_number is advisory (the design doc downgraded it from
+// a hard counter once collision handling exists), but it's a
+// fast-path cache for the per-repo MAX query that issue create still
+// relies on, so we keep it correct.
+func (s *Store) RecomputeNextIssueNumber(repoID int64) error {
+	var (
+		maxNum  sql.NullInt64
+		current int64
+	)
+	if err := s.DB.QueryRow(`SELECT MAX(number) FROM issues WHERE repo_id = ?`, repoID).Scan(&maxNum); err != nil {
+		return err
+	}
+	if err := s.DB.QueryRow(`SELECT next_issue_number FROM repos WHERE id = ?`, repoID).Scan(&current); err != nil {
+		return err
+	}
+	derived := int64(1)
+	if maxNum.Valid {
+		derived = maxNum.Int64 + 1
+	}
+	if derived <= current {
+		// Already correct (or higher). Don't bump updated_at — no
+		// state change.
+		return nil
+	}
+	_, err := s.DB.Exec(
+		`UPDATE repos SET next_issue_number = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		derived, repoID,
+	)
+	return err
 }
 
 func (s *Store) ListRepos() ([]*model.Repo, error) {
-	rows, err := s.DB.Query(`SELECT id, prefix, name, path, remote_url, next_issue_number, created_at FROM repos ORDER BY prefix`)
+	rows, err := s.DB.Query(`SELECT ` + repoCols + ` FROM repos ORDER BY prefix`)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +227,7 @@ type rowScanner interface {
 
 func scanRepo(row rowScanner) (*model.Repo, error) {
 	var r model.Repo
-	err := row.Scan(&r.ID, &r.Prefix, &r.Name, &r.Path, &r.RemoteURL, &r.NextIssueNumber, &r.CreatedAt)
+	err := row.Scan(&r.ID, &r.UUID, &r.Prefix, &r.Name, &r.Path, &r.RemoteURL, &r.NextIssueNumber, &r.CreatedAt, &r.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

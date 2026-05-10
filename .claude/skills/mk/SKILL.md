@@ -53,7 +53,7 @@ mk issue add --user agent-claude --json '{ ...same payload... }' -o json
 ## Calling `mk` from an agent
 
 - **Working directory matters.** Most commands resolve the repo from `cwd`. `cd` to the repo before running unless using `--all-repos` (available on `mk issue list` and `mk history`).
-- **Output format.** Default is human-readable text. Pass `-o json` (alias `--output json`) for structured output — use this when parsing.
+- **Output format.** Default is human-readable text. Pass `-o json` (alias `--output json`) for structured output — use this when parsing. Every record (repo, feature, issue, comment, document) JSON includes a `uuid` field — an immutable UUIDv7 identity assigned at create time. Keep using `key`/`slug`/`filename` for human-friendly addressing; `uuid` is the canonical identifier the git-backed sync layer matches on, but you only need it directly when debugging sync (see "Git-backed sync").
 - **Timestamps.** Every entity carries a `created_at`. Features, issues, and documents additionally have `updated_at` (bumped automatically on edits / state changes / tag mutations). In JSON they're UTC RFC 3339 (e.g. `2026-05-03T07:27:14Z`) — that is the parsing contract. In text mode they render in the user's local timezone (`2026-05-03 17:27 AEST`).
 - **Long-text inputs.** Description and comment body MUST come from a file (`--description-file path.md`) or stdin (`--description -`). There is no inline editor. For multi-line descriptions/comments, write to a temp file or pipe via `printf`/heredoc.
 - **Identifiers.**
@@ -467,6 +467,74 @@ mk pr list <KEY>                     One URL per line (or JSON)
 ```bash
 mk pr attach MINI-42 https://github.com/owner/repo/pull/7
 ```
+
+## Git-backed sync
+
+`mk sync` mirrors the local SQLite DB to a checked-in folder of YAML + markdown inside a separate **sync repo**. Multiple machines collaborate by pushing/pulling that sync repo through normal git, and `mk sync` reconciles it with the local DB — last-writer-wins per record, with already-in-git winning label collisions. Sync is opt-in: a project repo without `.mk/config.yaml` and a sync remote behaves exactly as before.
+
+The sync repo is its own git repo, marked by an `mk-sync.yaml` sentinel at its root. Project repos point at it via `.mk/config.yaml` (checked in: `sync.remote: <git URL>`). The same sync repo can hold many projects — one folder per prefix under `repos/`.
+
+```
+mk sync init <local-path> [--remote URL]   First-time setup. From inside a
+                                           project repo, creates the sync
+                                           repo at <local-path>, writes
+                                           mk-sync.yaml, exports the
+                                           project's data, commits, and
+                                           (with --remote) pushes. Refuses
+                                           if the remote already has data.
+
+mk sync clone [<local-path>] [--allow-renumber] [--dry-run]
+                                           Join an existing sync repo.
+                                           Reads .mk/config.yaml for the
+                                           remote, clones it, and runs the
+                                           first import. If local DB has
+                                           rows for the project's prefix
+                                           that would collide, refuses
+                                           unless --allow-renumber is set;
+                                           --dry-run prints the preview
+                                           without touching DB or disk.
+
+mk sync                                    Steady state: pull → import →
+                                           export → commit → push. Run
+                                           from inside a project repo. On
+                                           non-fast-forward push it pulls,
+                                           re-imports/re-exports, and
+                                           retries once.
+                                           Flags: --no-import, --no-export,
+                                           --no-push for fine-grained
+                                           skipping; --dry-run rolls back
+                                           DB writes and skips commit/push.
+
+mk sync verify                             Diagnostic: walks the sync repo
+                                           and reports parse failures,
+                                           uuid collisions, dangling
+                                           cross-references, case-folding
+                                           folder collisions, redirect-
+                                           chain cycles, orphan comment
+                                           files, and body-hash drift.
+                                           Errors → exit non-zero;
+                                           warnings (dangling refs,
+                                           hash drift) print but don't
+                                           change exit status.
+                                           Run from inside the sync repo.
+
+mk sync inspect <prefix>                   Read-only browse. Default is a
+mk sync inspect <prefix> --issue MINI-7    per-prefix summary (counts +
+mk sync inspect <prefix> --feature slug    recent renumbers). With one of
+mk sync inspect <prefix> --doc filename    the flags, prints the parsed
+                                           record and its body. Run from
+                                           inside the sync repo.
+```
+
+`mk sync verify` and `mk sync inspect` are the only sync commands that **must run inside the sync repo**. Everything else (`init`, `clone`, the bare `mk sync`) runs from a project repo.
+
+**On collisions.** If two clients separately create `MINI-7`, the one whose folder is already in git keeps the label; the other's local row gets renumbered to the next free number (or, for features/documents, suffixed: `auth-rewrite-2`, `auth-overview-2.md`). The audit log records `sync.renumber` / `sync.rename`; `redirects.yaml` in the sync repo records the old → new move so `mk issue show MINI-7` still resolves via the redirect chain. External references (commit messages, PRs, free-text mentions inside descriptions) aren't rewritten — humans decide what to do with them.
+
+**Identity.** Every record JSON includes a `uuid` field — an immutable UUIDv7 assigned at create time. Sync matches records by `uuid`, never by label, so renumbers and renames never lose history. Use `key`/`slug`/`filename` for human-friendly addressing in CLI calls; `uuid` is informational unless you're debugging the sync layer.
+
+**Mode switch.** Inside a sync repo, mk refuses to auto-register the directory as a tracked project (the `mk-sync.yaml` sentinel switches mk into sync-repo mode). Tracking commands (`mk issue add`, `mk feature edit`, …) error out with a "this is an mk sync repo" message, pointing the user back to a real project working tree.
+
+**Sync is local-only.** All sync commands error in remote mode (`--remote` / `MK_REMOTE`); the server is the source of truth there.
 
 ## HTTP API
 
