@@ -181,10 +181,11 @@ func (h *historyView) View(width, height int) string {
 	}
 
 	// Layout: " when │ actor │ op │ target │ details ". Each cell carries 1
-	// column of left+right padding inside the separators.
+	// column of left+right padding inside the separators. Five cells, four
+	// separators.
 	const sep = "│"
-	cellPad := 2                                                                     // 1 left + 1 right
-	fixedW := whenW + actorW + opW + targetW + 4*cellPad + 4*lipgloss.Width(sep) + 1 // leading separator? we use leading space instead
+	cellPad := 2 // 1 left + 1 right
+	fixedW := whenW + actorW + opW + targetW + 5*cellPad + 4*lipgloss.Width(sep)
 	detailsW := innerWidth - fixedW
 	if detailsW < 8 {
 		detailsW = 8
