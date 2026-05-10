@@ -2,9 +2,11 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/mrgeoffrich/mini-kanban/internal/git"
@@ -69,4 +71,64 @@ func (c *remoteClient) EnsureRepo(ctx context.Context, info *git.Info) (*model.R
 		return nil, false, fmt.Errorf("create repo: %w", err)
 	}
 	return &created, true, nil
+}
+
+func (c *remoteClient) DeleteRepo(ctx context.Context, prefix, confirm string, dryRun bool) (*model.Repo, *RepoDeletePreview, error) {
+	prefix = strings.ToUpper(strings.TrimSpace(prefix))
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	if confirm != "" {
+		q.Set("confirm", confirm)
+	}
+	if dryRun {
+		var preview RepoDeletePreview
+		if err := c.do(ctx, http.MethodDelete, "/repos/"+prefix, q, nil, &preview); err != nil {
+			return nil, nil, err
+		}
+		return nil, &preview, nil
+	}
+	// For real deletes, fetch the repo first so the caller can render
+	// the success message with name/path. Mirrors remote_issue.go's
+	// fetch-then-delete pattern.
+	repo, err := c.GetRepoByPrefix(ctx, prefix)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := c.do(ctx, http.MethodDelete, "/repos/"+prefix, q, nil, nil); err != nil {
+		// Server returns 412 + Code=confirm_required when the
+		// confirmation gate trips. Rehydrate the preview from
+		// HTTPError.Details so the caller can show the alert.
+		var he *HTTPError
+		if errors.As(err, &he) && he.Status == http.StatusPreconditionFailed && he.Code == "confirm_required" {
+			preview := decodePreviewFromDetails(he.Details)
+			return nil, nil, &RepoConfirmError{
+				Prefix:     prefix,
+				GotConfirm: confirm,
+				Preview:    preview,
+			}
+		}
+		return nil, nil, err
+	}
+	return repo, nil, nil
+}
+
+// decodePreviewFromDetails rehydrates a RepoDeletePreview from the
+// server's error envelope. Details is map[string]any decoded by
+// remote.go; we round-trip it through JSON to leverage the struct
+// tags rather than reach in by key.
+func decodePreviewFromDetails(details map[string]any) *RepoDeletePreview {
+	if details == nil {
+		return nil
+	}
+	raw, err := json.Marshal(details)
+	if err != nil {
+		return nil
+	}
+	var preview RepoDeletePreview
+	if err := json.Unmarshal(raw, &preview); err != nil {
+		return nil
+	}
+	return &preview
 }

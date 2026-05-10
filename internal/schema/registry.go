@@ -63,7 +63,21 @@ var Registry = []Entry{
 	{"doc.link", "Link a document to an issue or feature.", typeOf[inputs.DocLinkInput](), inputs.ExampleDocLink},
 	{"doc.unlink", "Remove a document's link to an issue or feature.", typeOf[inputs.DocUnlinkInput](), inputs.ExampleDocUnlink},
 	{"doc.export", "Write a document's content to disk.", typeOf[inputs.DocExportInput](), inputs.ExampleDocExport},
+
+	{"repo.rm", repoRmDescription, typeOf[inputs.RepoRmInput](), inputs.ExampleRepoRm},
 }
+
+// repoRmDescription is the LLM-targeted warning text published via
+// `mk schema show repo.rm` and `GET /schema/repo.rm`. Kept as a const
+// so the wording is the same for every consumer of the schema.
+const repoRmDescription = "DESTRUCTIVE & IRREVERSIBLE. Deletes a repo and ALL of its issues, " +
+	"comments, features, documents, document links, issue relations, PR " +
+	"attachments, TUI settings, and history rows. There is no undo. " +
+	"Requires `confirm` to exactly match the target repo's prefix " +
+	"(case-insensitive). Without it the CLI returns the impact preview " +
+	"and errors out — agents driving mk MUST stop and ask the user to " +
+	"approve before re-running with `confirm` set. Always run with " +
+	"`--dry-run` first to inspect the cascade."
 
 // Find looks up a registry entry by its dotted name.
 func Find(name string) (Entry, bool) {

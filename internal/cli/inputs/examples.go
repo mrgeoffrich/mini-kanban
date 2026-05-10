@@ -119,4 +119,8 @@ var (
 		Path:      "/Users/dev/code/mini-kanban",
 		RemoteURL: "https://github.com/example/mini-kanban.git",
 	}
+	ExampleRepoRm = RepoRmInput{
+		Prefix:  "MINI",
+		Confirm: "MINI",
+	}
 )
