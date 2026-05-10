@@ -1,19 +1,10 @@
 # mini-kanban (`mk`)
 
-A local-first, single-binary issue tracker designed to be driven equally well by humans and AI agents.
+A local-first issue tracker designed to be **driven by an AI agent**.
 
-`mk` is a CLI and TUI on top of a single SQLite file at `~/.mini-kanban/db.sqlite`. It auto-detects which repo you're in, gives every issue a `PREFIX-N` key (e.g. `MINI-42`), and exposes every read in JSON so scripts and skills can drive it without parsing text. Long-text fields (descriptions, comments, doc bodies) are supplied via files or stdin, never inline flags — friendly to multi-line input from agents.
+You talk to Claude Code; Claude files issues, updates state, breaks features into tasks, and answers questions about your board. As a human, you mostly *read* — in your editor, on the CLI (`mk issue list`), or in the full-screen TUI (`mk tui`).
 
-## Features
-
-- **Issues, features, comments, relations, tags, PR attachments** — the boring kanban basics, fully scriptable.
-- **Per-repo "documents"** — typed text blobs (architecture / designs / planning / etc.) that link to issues and features. Useful as a stable place to park specs the LLM should always have at hand.
-- **`mk doc add --from-path` / `mk doc export --to-path`** — round-trip a doc to/from its on-disk source location, no shell-glue regex needed.
-- **`mk issue brief <KEY>`** — bulk-context JSON: issue + parent feature + all linked doc bodies + comments + relations + PRs, in one read. Designed to be piped straight into an LLM prompt.
-- **TUI (`mk tui`)** — bubbletea-based full-screen kanban for human review.
-- **Audit log** — every mutation is recorded with an actor name (`--user <name>`); 60-day retention.
-- **REST API (`mk api`)** — same operations over HTTP for non-shell callers (web UIs, IDE plugins, long-running agents).
-- **CLI client mode (`--remote` / `MK_REMOTE`)** — point the CLI at an `mk api` server instead of the local DB; every retargetable verb works against either backend.
+It's a single binary on top of one SQLite file at `~/.mini-kanban/db.sqlite`. No server, no account, no setup beyond `mk init` and `mk install-skill`.
 
 ## Install
 
@@ -33,97 +24,25 @@ go build -o ~/.local/bin/mk ./cmd/mk
 
 ```bash
 cd ~/Repos/your-project
-mk init                     # binds the cwd to a 4-letter prefix derived from the repo name
-mk issue add "Login broken on Safari" --description-file /tmp/repro.md --tag bug
-mk issue list
-mk tui                      # interactive board
-mk api                      # local REST API on 127.0.0.1:5320 (same DB)
+mk init                # bind this repo to a 4-letter prefix
+mk install-skill       # teach Claude Code how to drive mk
 ```
 
-To file work on behalf of an AI agent, always pass `--user <agent-name>` so audits attribute correctly:
+Now open Claude Code and say:
 
-```bash
-mk issue add "Refactor auth middleware" --user Claude
-```
+> File an issue: the login page 500s on Safari when the password contains a `&`.
 
-## Output format
+Claude does the rest.
 
-Every read command supports `-o json` (alias `--output json`):
+For the full walk-through — first session, sample skills, multi-machine sync — see **[docs/getting-started.md](docs/getting-started.md)**.
 
-```bash
-mk issue list --state in_progress -o json | jq '.[] | .key'
-```
+## Why mk
 
-JSON is the contract. Text mode is for humans and may shift between releases.
-
-## REST API
-
-`mk api` exposes the same operations over HTTP, backed by the same SQLite
-file. Defaults to `127.0.0.1:5320`. Set `MK_API_TOKEN` (or pass `--token`)
-to require `Authorization: Bearer <token>`.
-
-    mk api &
-    curl http://127.0.0.1:5320/healthz
-
-The API is intended for local-only callers (web UIs, IDE plugins, agents
-that aren't a child process). Exposes `/healthz`, `/schema*`, `/repos*`,
-the full issue / comment / relation / pull-request / tag surface under
-`/repos/{prefix}/issues*`, the feature surface under
-`/repos/{prefix}/features*` including bulk-context (`/issues/{key}/brief`),
-plan view (`/features/{slug}/plan`), and atomic claim
-(`POST /features/{slug}/next`), the document surface under
-`/repos/{prefix}/documents*` (CRUD + rename + link/unlink), and an audit
-log under `/history` (cross-repo) and `/repos/{prefix}/history` (scoped).
-
-Documents support a non-JSON streaming download endpoint —
-`GET /repos/{prefix}/documents/{filename}/download` returns the raw
-markdown body so `curl -O` saves a file directly. This replaces the
-CLI's `mk doc export --to-path`; the API never reads or writes the
-server filesystem.
-
-Every mutation accepts `?dry_run=true` (or `X-Dry-Run: 1`); set
-`X-Actor: <name>` so audit rows attribute correctly (and to claim
-work — `POST /features/{slug}/next` requires it). See
-`docs/rest-api-design.md` for the full route table.
-
-### CLI client mode
-
-The same `mk` binary can drive a remote `mk api` server instead of the
-local DB. Set `--remote <url>` (or `MK_REMOTE`) and `--token <secret>`
-(or `MK_API_TOKEN`):
-
-    MK_REMOTE=http://team-mk:5320 MK_API_TOKEN=$T mk issue list
-    mk --remote http://team-mk:5320 issue add "Login broken" --feature auth
-
-Every read and mutating verb works in remote mode with the same flags,
-positionals, and JSON output as local mode. Audit rows are written by
-the API server, not the client. A small set of filesystem-touching
-verbs stay local-only and error clearly when `MK_REMOTE` is set:
-`mk init`, `mk install-skill`, `mk doc add --from-path`, `mk doc upsert
---from-path`, `mk doc export`, and `mk tui`. Use the new
-`mk doc download <filename>` (writes to stdout, or `--to <path>`) when
-you need a doc body locally in remote mode. See
-`docs/cli-client-mode.md` for the full design.
-
-## AI-agent integration
-
-`mk` ships a Claude Code skill that documents the full surface for agents. To install it into another repo, run from anywhere inside that repo:
-
-```bash
-mk install-skill
-```
-
-This writes `.claude/skills/mk/SKILL.md` so Claude Code's project-skill auto-discovery picks it up. Re-run after upgrading `mk` to refresh the docs.
-
-The skill at `.claude/skills/mk/SKILL.md` documents both the CLI and HTTP API surfaces; agents discover endpoints at runtime via `GET /schema` (mirrors `mk schema all`) and use `?dry_run=true` + `X-Actor: <name>` to rehearse and attribute work.
-
-For one-shot LLM context on a single issue:
-
-```bash
-mk issue brief MINI-42 | tee /tmp/ctx.json
-```
-
-Returns a single JSON object with the issue, parent feature, deduped linked documents (with full content inlined), comments, relations, PRs, and a warnings array.
+- **AI-first.** Every read returns JSON, every mutation accepts a JSON payload, every payload schema is published at runtime via `mk schema`. The bundled Claude Code skill (`mk install-skill`) is the single source of truth for agents.
+- **Local-first.** One SQLite file, one git working tree per project. No sync until you want it.
+- **Auditable.** Every mutation records who did it, when, and what changed. Pass `--user Claude` so audits attribute correctly.
+- **Optional sync.** When you want the same board on a second machine or another teammate, `mk sync init` mirrors the DB to a checked-in YAML repo over plain git.
+- **Optional REST API.** `mk api` exposes the same operations over HTTP for non-shell callers (web UIs, IDE plugins, long-running agents). Same SQLite file, same JSON shapes, same audit log. See `docs/rest-api-design.md`.
 
 ## Project status
 
