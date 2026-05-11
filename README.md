@@ -52,7 +52,20 @@ cd ~/Repos/your-project
 mk tui
 ```
 
-A full-screen kanban opens with four tabs — Board, Features, Docs, History — driven entirely by the keyboard. Press `?` for the bindings available in the focused tab, `q` (or `ctrl+c`) to exit.
+A full-screen kanban opens with four tabs — Board, Features, Docs, History — driven entirely by the keyboard.
+
+<p align="center">
+  <img src="docs/screenshots/01.png" alt="Board tab" width="80%" />
+</p>
+
+Press `?` for the bindings available in the focused tab, `q` (or `ctrl+c`) to exit. Open any card for the full description and comments, or jump to the Features, Docs, and History tabs:
+
+<p align="center">
+  <img src="docs/screenshots/02.png" alt="Card overlay" width="49%" />
+  <img src="docs/screenshots/03.png" alt="Features tab" width="49%" />
+  <img src="docs/screenshots/04.png" alt="Documents tab" width="49%" />
+  <img src="docs/screenshots/05.png" alt="History tab" width="49%" />
+</p>
 
 ## View my issues and features as files (sync)
 
