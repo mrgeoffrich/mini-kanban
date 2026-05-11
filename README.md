@@ -1,8 +1,8 @@
 # mini-kanban (`mk`)
 
-A local-first kanban board for anyone. **claude does the work, you orchestrate it.**
+A local-first kanban board for anyone. **Claude/Codex does the work, you orchestrate it.**
 
-You talk to Claude Code; claude does the typing — files issues, updates state, breaks features into tasks, answers questions about your board. You mostly *read* — in your editor of choice, on the CLI (`mk issue list`) , in the TUI (`mk tui`) or in your favourite editor.
+You talk to Claude Code or Codex; it does the typing — files issues, updates state, breaks features into tasks, answers questions about your board. You mostly *read* — in your editor of choice, on the CLI (`mk issue list`) , in the TUI (`mk tui`) or in your favourite editor.
 
 <p align="center">
   <img src="docs/screenshots/01.png" alt="The mk TUI board" width="80%" />
@@ -25,11 +25,11 @@ mk init                # creates a 4 letter prefix for this project
 mk install-skill       # teaches Claude Code how to drive mk
 ```
 
-Now open Claude Code and say:
+Now open Claude Code / Codex and say:
 
 > File an issue: the login page 500s on Safari when the password contains a `&`.
 
-Claude does the rest — picks a title, picks tags, files the ticket, hands you back the key.
+The AI does the rest — picks a title, picks tags, files the ticket, hands you back the key.
 
 For the full walk-through — first session, sample skills, multi-machine sync — see **[docs/getting-started.md](docs/getting-started.md)**.
 
@@ -61,7 +61,7 @@ You might want to view all the issues, documents and features using your favouri
 gh repo create your-project-mk-sync --private
 ```
 
-Any empty git remote works (GitLab, Gitea, a bare repo on a server you control); the contents are plain text.
+Any empty git remote works (GitLab, Gitea, a bare repo on a server you control); the contents are human readable plain text.
 
 2. **From inside your project, set it up:**
 
@@ -81,11 +81,11 @@ Run it whenever — pushes your writes, pulls anyone else's. Multi-machine setup
 
 ## Why mk
 
-- **Built for claude.** Reads return JSON. Mutations take JSON. Every payload schema is reachable at runtime via `mk schema`. The bundled Claude Code skill (`mk install-skill`) is the single source of truth for agents.
+- **Built for LLMs.** The CLI reads return JSON. CLI updates/writes take JSON. Every payload schema is reachable at runtime via `mk schema`. The bundled skill (`mk install-skill`) is the single source of truth for agents.
 - **Local-first.** Your board starts life as a single SQLite DB file. Nothing leaves the laptop until you run `mk sync`.
 - **Auditable.** Every mutation records who, when, and what changed. (claude knows to pass `--user claude` so the log attributes correctly.)
 - **Optional sync.** Want the same board on a laptop and a desktop? `mk sync init`, plain git underneath.
-- **Optional REST API.** `mk api` puts the CLI behind HTTP — handy for web UIs, IDE plugins, long-running agents. See `docs/rest-api-design.md`.
+- **Optional REST API.** `mk api` puts the CLI behind HTTP — handy for web UIs, IDE plugins, long-running agents.
 
 ## Project status
 
