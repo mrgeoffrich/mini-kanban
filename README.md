@@ -1,10 +1,10 @@
 # mini-kanban (`mk`)
 
-A local-first issue tracker designed to be **driven by an AI agent**.
+A local-first kanban for developers. **claude does the work, you orchestrate it.**
 
-You talk to Claude Code; Claude files issues, updates state, breaks features into tasks, and answers questions about your board. As a human, you mostly *read* — in your editor, on the CLI (`mk issue list`), or in the full-screen TUI (`mk tui`).
+You talk to Claude Code; claude files issues, updates state, breaks features into tasks, and answers questions about your board. As a human you mostly *read* — in your editor, on the CLI (`mk issue list`), or in the full-screen TUI (`mk tui`).
 
-It's a single binary on top of one SQLite file at `~/.mini-kanban/db.sqlite`. No server, no account, no setup beyond `mk init` and `mk install-skill`.
+One binary, one SQLite file at `~/.mini-kanban/db.sqlite`. No server, no account, no setup beyond `mk init` and `mk install-skill`.
 
 <p align="center">
   <img src="docs/screenshots/01.png" alt="The mk TUI board" width="80%" />
@@ -45,11 +45,11 @@ Now open Claude Code and say:
 
 > File an issue: the login page 500s on Safari when the password contains a `&`.
 
-Claude does the rest.
+claude does the rest.
 
 For the full walk-through — first session, sample skills, multi-machine sync — see **[docs/getting-started.md](docs/getting-started.md)**.
 
-## View my issues via TUI
+## Read the board
 
 ```bash
 cd ~/Repos/your-project
@@ -65,7 +65,7 @@ A full-screen kanban opens with four tabs — Board (shown at the top of this RE
   <img src="docs/screenshots/05.png" alt="History tab" width="49%" />
 </p>
 
-## View my issues and features as files (sync)
+## Sync the board to git
 
 `mk sync` mirrors the SQLite DB to a folder of YAML + markdown in a separate git repo — handy for browsing the board in your editor, diffing changes over time, or sharing a board across machines.
 
@@ -95,9 +95,9 @@ A full-screen kanban opens with four tabs — Board (shown at the top of this RE
 
 ## Why mk
 
-- **AI-first.** Every read returns JSON, every mutation accepts a JSON payload, every payload schema is published at runtime via `mk schema`. The bundled Claude Code skill (`mk install-skill`) is the single source of truth for agents.
+- **Built for claude.** Every read returns JSON, every mutation accepts a JSON payload, every payload schema is published at runtime via `mk schema`. The bundled Claude Code skill (`mk install-skill`) is the single source of truth for agents.
 - **Local-first.** One SQLite file, one git working tree per project. No sync until you want it.
-- **Auditable.** Every mutation records who did it, when, and what changed. Pass `--user Claude` so audits attribute correctly.
+- **Auditable.** Every mutation records who did it, when, and what changed. Pass `--user claude` so audits attribute correctly.
 - **Optional sync.** When you want the same board on a second machine or another teammate, `mk sync init` mirrors the DB to a checked-in YAML repo over plain git.
 - **Optional REST API.** `mk api` exposes the same operations over HTTP for non-shell callers (web UIs, IDE plugins, long-running agents). Same SQLite file, same JSON shapes, same audit log. See `docs/rest-api-design.md`.
 

@@ -1,12 +1,12 @@
 # Getting started with `mk`
 
-`mk` is an issue tracker for a single user (or a small team), built so Claude Code can drive it. The standard workflow is:
+`mk` is a kanban for a single developer (or a small team), built so Claude Code can drive it. The standard loop:
 
-1. You ask Claude Code something — *"file an issue for the Safari bug"*, *"what's on my plate?"*, *"plan out the auth rewrite"*.
-2. Claude reads the relevant state from `mk`, performs writes if needed, and tells you what it did.
-3. You read the result in your editor, in `mk tui`, or on the CLI.
+1. you ask Claude Code something — *"file an issue for the Safari bug"*, *"what's on my plate?"*, *"plan out the auth rewrite"*.
+2. claude reads the relevant state from `mk`, writes if needed, tells you what it did.
+3. you read the result in your editor, in `mk tui`, or on the CLI.
 
-You **don't have to memorise mk's commands**. Claude has a copy of the canonical skill (installed once per repo) and knows the surface. You can drop into `mk --help` if you want — but the design assumes you mostly won't.
+You **don't have to memorise mk's commands**. claude has a copy of the canonical skill (installed once per repo) and knows the surface. You can drop into `mk --help` if you want — but the design assumes you mostly won't.
 
 This guide walks you through:
 
@@ -47,21 +47,21 @@ Open Claude Code in the project and try this conversation.
 
 ### File an issue
 
-> **You**: We've got a bug — login 500s on Safari when the password contains a `&`. Can you log it?
+> **you**: we've got a bug — login 500s on Safari when the password contains a `&`. can you log it?
 >
-> **Claude**: *(calls `mk issue add` with title, description, tag `bug`)*
-> Filed as `YOUR-1`.
+> **claude**: *(calls `mk issue add` with title, description, tag `bug`)*
+> filed as `YOUR-1`.
 
-Claude doesn't ask you to confirm a flag dump — it composes a JSON payload, optionally rehearses it with `--dry-run`, then commits and tells you the issue key. The audit log records the action against `--user Claude` (or whatever name your agent identifies as) so you can later see who wrote what.
+claude doesn't ask you to confirm a flag dump — it composes a JSON payload, optionally rehearses with `--dry-run`, then commits and tells you the issue key. The audit log records the action against `--user claude` (or whatever name your agent identifies as) so you can later see who wrote what.
 
 ### Ask what's on your plate
 
-> **You**: What's in progress?
+> **you**: what's in progress?
 >
-> **Claude**: *(calls `mk issue list --state in_progress -o json`)*
-> Two items: `YOUR-3` (auth rewrite) and `YOUR-7` (flaky deploy test). Want details on either?
+> **claude**: *(calls `mk issue list --state in_progress -o json`)*
+> two items: `YOUR-3` (auth rewrite) and `YOUR-7` (flaky deploy test). want details on either?
 
-Lists are read-only and return JSON. Claude summarises so you don't have to skim raw output.
+Lists are read-only and return JSON. claude summarises so you don't have to skim raw output.
 
 ### Look at the board yourself
 
@@ -71,34 +71,34 @@ When you want to *see* the board, not chat about it:
 mk tui
 ```
 
-This is the full-screen kanban — read-first. You can move cards by hand from here, but most users find the muscle memory that sticks is to keep using Claude for writes and use the TUI as a window into the state.
+This is the full-screen kanban — read-first. You can move cards by hand from here, but most users find the muscle memory that sticks is to keep using claude for writes and use the TUI as a window into the state.
 
 ### Take a closer look at one issue
 
-> **You**: Tell me about YOUR-3.
+> **you**: tell me about YOUR-3.
 >
-> **Claude**: *(calls `mk issue brief YOUR-3`)*
-> Here's the gist: …
+> **claude**: *(calls `mk issue brief YOUR-3`)*
+> here's the gist: …
 
-`mk issue brief` is the bulk-context call. Claude pulls the issue, parent feature, comments, relations, attached PRs, and any linked design documents in one read. Good for *"catch me up"* questions.
+`mk issue brief` is the bulk-context call. claude pulls the issue, parent feature, comments, relations, attached PRs, and any linked design documents in one read. Good for *"catch me up"* questions.
 
 ### Other things you can ask
 
-The flexibility comes from Claude knowing the full surface, not from memorised command names:
+The flexibility comes from claude knowing the full surface, not from memorised command names:
 
 - *"Move YOUR-3 to in review."*
 - *"Tag YOUR-12 as P1 and attach it to the auth-rewrite feature."*
 - *"What's blocked, and by what?"*
 - *"Add a comment on YOUR-7 saying I tried clearing the cookie and it didn't help."*
-- *"Show me everything Claude did yesterday."* (audit log)
+- *"Show me everything claude did yesterday."* (audit log)
 
-If a request maps to something `mk` exposes, Claude will pick it up.
+If a request maps to something `mk` exposes, claude will pick it up.
 
 ---
 
 ## 3. Sample skills (optional)
 
-The canonical `mk` skill teaches Claude **how** to call the CLI. The sample skills bundled with `mk` teach Claude **when** and **why** for common flows — they're shortcuts you can drop into your repo when the bare canonical skill isn't picking up your phrasing.
+The canonical `mk` skill teaches claude **how** to call the CLI. The sample skills bundled with `mk` teach claude **when** and **why** for common flows — they're shortcuts you can drop into your repo when the bare canonical skill isn't picking up your phrasing.
 
 Install all four into the current repo:
 
@@ -129,7 +129,7 @@ These are templates — open them, tweak the trigger phrases or the procedural s
 
 ## 4. The CLI as a fallback
 
-You don't need to drive `mk` directly, but you can. Useful for tab-completion-friendly commands, scripts, and getting a quick read on something without opening Claude:
+You don't need to drive `mk` directly, but you can. Useful for tab-completion-friendly commands, scripts, and getting a quick read on something without opening Claude Code:
 
 ```bash
 mk status                      # repo + issue counts at a glance
@@ -139,7 +139,7 @@ mk feature plan auth-rewrite   # topo-sorted execution plan
 mk history --since 1d          # last day's mutations
 ```
 
-For the full surface, `mk --help` and `mk <subcommand> --help` cover everything. The exhaustive reference is `.claude/skills/mk/SKILL.md` (the same file Claude reads) — open it any time you want to know what's possible.
+For the full surface, `mk --help` and `mk <subcommand> --help` cover everything. The exhaustive reference is `.claude/skills/mk/SKILL.md` (the same file claude reads) — open it any time you want to know what's possible.
 
 ---
 
@@ -188,4 +188,4 @@ For collisions, conflict semantics, redirect chains, and the verify-and-inspect 
 - **`docs/agent-cli-principles.md`** — the design rules `mk` follows so agents can drive it reliably.
 - **`mk --help`** — every CLI command with one-line summaries.
 
-If something in this guide is wrong or unclear, file an issue — *"hey Claude, file an issue against mk: …"*.
+If something in this guide is wrong or unclear, file an issue — *"hey claude, file an issue against mk: …"*.
