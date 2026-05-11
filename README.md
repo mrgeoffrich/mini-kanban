@@ -1,10 +1,12 @@
 # mini-kanban (`mk`)
 
-A local-first issue tracker designed to be **driven by an AI agent**.
+A local-first kanban board for anyone. **Claude/Codex does the work, you orchestrate it.**
 
-You talk to Claude Code; Claude files issues, updates state, breaks features into tasks, and answers questions about your board. As a human, you mostly *read* — in your editor, on the CLI (`mk issue list`), or in the full-screen TUI (`mk tui`).
+You talk to Claude Code or Codex; it does the typing — files issues, updates state, breaks features into tasks, answers questions about your board. You mostly *read* — in your editor of choice, on the CLI (`mk issue list`) , in the TUI (`mk tui`) or in your favourite editor.
 
-It's a single binary on top of one SQLite file at `~/.mini-kanban/db.sqlite`. No server, no account, no setup beyond `mk init` and `mk install-skill`.
+<p align="center">
+  <img src="docs/screenshots/01.png" alt="The mk TUI board" width="80%" />
+</p>
 
 ## Install
 
@@ -15,80 +17,75 @@ brew tap mrgeoffrich/mk
 brew install mk
 ```
 
-**`go install`** (pure-Go SQLite via modernc, no CGO required):
-
-```bash
-go install github.com/mrgeoffrich/mini-kanban/cmd/mk@latest
-```
-
-**From a checkout:**
-
-```bash
-go build -o ~/.local/bin/mk ./cmd/mk
-```
-
-Either way, `mk --version` prints the version (release tag for prebuilt or `go install`-ed binaries; commit hash for `go build`).
-
 ## Quick start
 
 ```bash
-cd ~/Repos/your-project
-mk init                # bind this repo to a 4-letter prefix
-mk install-skill       # teach Claude Code how to drive mk
+cd ~/your-project
+mk init                # creates a 4 letter prefix for this project
+mk install-skill       # teaches Claude Code how to drive mk
 ```
 
-Now open Claude Code and say:
+Now open Claude Code / Codex and say:
 
 > File an issue: the login page 500s on Safari when the password contains a `&`.
 
-Claude does the rest.
+The AI does the rest — picks a title, picks tags, files the ticket, hands you back the key.
 
 For the full walk-through — first session, sample skills, multi-machine sync — see **[docs/getting-started.md](docs/getting-started.md)**.
 
-## View my issues via TUI
+## Read the board
 
 ```bash
-cd ~/Repos/your-project
+cd ~/your-project
 mk tui
 ```
 
-A full-screen kanban opens with four tabs — Board, Features, Docs, History — driven entirely by the keyboard. Press `?` for the bindings available in the focused tab, `q` (or `ctrl+c`) to exit.
+A full-screen kanban with four tabs — Board (above), Features, Docs, History — all keyboard driven. `?` shows the bindings for the focused tab, `q` (or `esc`) exits. Open any card for the full description and comments, or jump to the other tabs:
 
-## View my issues and features as files (sync)
+<p align="center">
+  <img src="docs/screenshots/02.png" alt="Card overlay" width="48%" />
+  <img src="docs/screenshots/03.png" alt="Features tab" width="48%" />
+  <img src="docs/screenshots/04.png" alt="Documents tab" width="48%" />
+  <img src="docs/screenshots/05.png" alt="History tab" width="48%" />
+</p>
 
-`mk sync` mirrors the SQLite DB to a folder of YAML + markdown in a separate git repo — handy for browsing the board in your editor, diffing changes over time, or sharing a board across machines.
+## How do I work on different machines with a local database? Can I view issues in my favourite editor?
+
+You might want to view all the issues, documents and features using your favourite editor instead of via the TUI. And you might work across a number of devices. You can enable sync to a git repository for all contents to keep a central working copy of everything.
+
+`mk sync` mirrors the DB to a folder of YAML + markdown in a separate git repo — handy for browsing the board in your editor, diffing changes over time, or sharing a board across machines.
 
 1. **Create an empty git repo for the sync data.** On GitHub:
 
-   ```bash
-   gh repo create your-project-mk-sync --private
-   ```
+```bash
+gh repo create your-project-mk-sync --private
+```
 
-   Any empty git remote works (GitLab, Gitea, a bare repo on a server you control); the contents are plain text.
+Any empty git remote works (GitLab, Gitea, a bare repo on a server you control); the contents are human readable plain text.
 
-2. **From inside your project, seed it:**
+2. **From inside your project, set it up:**
 
-   ```bash
-   mk sync init ~/sync/your-project --remote git@github.com:you/your-project-mk-sync.git
-   ```
+```bash
+mk sync init ~/your-project --remote https://github.com/you/your-project-mk-sync.git
+```
 
-   This creates `~/sync/your-project` with one file per issue, feature, and document, commits, and pushes. It also writes `.mk/config.yaml` inside your project (check it in) so future `mk sync` calls — and other machines via `mk sync clone` — know which remote to use.
+This creates `~/sync/your-project` with one file per issue, feature, and document, commits, and pushes. It also writes `.mk/config.yaml` inside your project (check it in) so future `mk sync` calls — and other machines via `mk sync clone` — know which remote to use.
 
 3. **Keep it in sync as you work:**
 
-   ```bash
-   mk sync                # pull → import → export → commit → push
-   ```
+```bash
+mk sync                # pull → import → export → commit → push
+```
 
-   Run it whenever you want to flush local writes upstream and pick up anyone else's. Multi-machine setup, conflict semantics, and the inspect/verify tools live in [docs/getting-started.md](docs/getting-started.md#5-sync-across-machines-when-youre-ready).
+Run it whenever — pushes your writes, pulls anyone else's. Multi-machine setup, conflict semantics, and the inspect/verify tools live in [docs/getting-started.md](docs/getting-started.md#5-sync-across-machines-when-youre-ready).
 
 ## Why mk
 
-- **AI-first.** Every read returns JSON, every mutation accepts a JSON payload, every payload schema is published at runtime via `mk schema`. The bundled Claude Code skill (`mk install-skill`) is the single source of truth for agents.
-- **Local-first.** One SQLite file, one git working tree per project. No sync until you want it.
-- **Auditable.** Every mutation records who did it, when, and what changed. Pass `--user Claude` so audits attribute correctly.
-- **Optional sync.** When you want the same board on a second machine or another teammate, `mk sync init` mirrors the DB to a checked-in YAML repo over plain git.
-- **Optional REST API.** `mk api` exposes the same operations over HTTP for non-shell callers (web UIs, IDE plugins, long-running agents). Same SQLite file, same JSON shapes, same audit log. See `docs/rest-api-design.md`.
+- **Built for LLMs.** The CLI reads return JSON. CLI updates/writes take JSON. Every payload schema is reachable at runtime via `mk schema`. The bundled skill (`mk install-skill`) is the single source of truth for agents.
+- **Local-first.** Your board starts life as a single SQLite DB file. Nothing leaves the laptop until you run `mk sync`.
+- **Auditable.** Every mutation records who, when, and what changed. (claude knows to pass `--user claude` so the log attributes correctly.)
+- **Optional sync.** Want the same board on a laptop and a desktop? `mk sync init`, plain git underneath.
+- **Optional REST API.** `mk api` puts the CLI behind HTTP — handy for web UIs, IDE plugins, long-running agents.
 
 ## Project status
 
