@@ -633,9 +633,18 @@ Verbs that touch the local filesystem or terminal error clearly in remote mode a
 
 ## Installation
 
-If unsure whether `mk` is installed for the user, run `mk --help`. If it's missing, build from source in the mini-kanban repo:
+If unsure whether `mk` is installed for the user, run `mk --help`. The currently installed version is shown by `mk --version` — useful when reporting bugs or confirming a feature is available.
+
+If `mk` is missing, install it one of these ways (prefer whichever fits the user's environment):
 
 ```bash
+# Prebuilt binary via Homebrew (macOS / Linux):
+brew tap mrgeoffrich/mk && brew install mk
+
+# Pure-Go install (no CGO):
+go install github.com/mrgeoffrich/mini-kanban/cmd/mk@latest
+
+# From a mini-kanban checkout:
 go build -o ~/.local/bin/mk ./cmd/mk
 ```
 
