@@ -45,6 +45,43 @@ Claude does the rest.
 
 For the full walk-through — first session, sample skills, multi-machine sync — see **[docs/getting-started.md](docs/getting-started.md)**.
 
+## View my issues via TUI
+
+```bash
+cd ~/Repos/your-project
+mk tui
+```
+
+A full-screen kanban opens with four tabs — Board, Features, Docs, History — driven entirely by the keyboard. Press `?` for the bindings available in the focused tab, `q` (or `ctrl+c`) to exit.
+
+## View my issues and features as files (sync)
+
+`mk sync` mirrors the SQLite DB to a folder of YAML + markdown in a separate git repo — handy for browsing the board in your editor, diffing changes over time, or sharing a board across machines.
+
+1. **Create an empty git repo for the sync data.** On GitHub:
+
+   ```bash
+   gh repo create your-project-mk-sync --private
+   ```
+
+   Any empty git remote works (GitLab, Gitea, a bare repo on a server you control); the contents are plain text.
+
+2. **From inside your project, seed it:**
+
+   ```bash
+   mk sync init ~/sync/your-project --remote git@github.com:you/your-project-mk-sync.git
+   ```
+
+   This creates `~/sync/your-project` with one file per issue, feature, and document, commits, and pushes. It also writes `.mk/config.yaml` inside your project (check it in) so future `mk sync` calls — and other machines via `mk sync clone` — know which remote to use.
+
+3. **Keep it in sync as you work:**
+
+   ```bash
+   mk sync                # pull → import → export → commit → push
+   ```
+
+   Run it whenever you want to flush local writes upstream and pick up anyone else's. Multi-machine setup, conflict semantics, and the inspect/verify tools live in [docs/getting-started.md](docs/getting-started.md#5-sync-across-machines-when-youre-ready).
+
 ## Why mk
 
 - **AI-first.** Every read returns JSON, every mutation accepts a JSON payload, every payload schema is published at runtime via `mk schema`. The bundled Claude Code skill (`mk install-skill`) is the single source of truth for agents.
