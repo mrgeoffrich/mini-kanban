@@ -6,6 +6,10 @@ You talk to Claude Code; Claude files issues, updates state, breaks features int
 
 It's a single binary on top of one SQLite file at `~/.mini-kanban/db.sqlite`. No server, no account, no setup beyond `mk init` and `mk install-skill`.
 
+<p align="center">
+  <img src="docs/screenshots/01.png" alt="The mk TUI board" width="80%" />
+</p>
+
 ## Install
 
 **Homebrew** (macOS and Linux, prebuilt binaries):
@@ -52,13 +56,7 @@ cd ~/Repos/your-project
 mk tui
 ```
 
-A full-screen kanban opens with four tabs — Board, Features, Docs, History — driven entirely by the keyboard.
-
-<p align="center">
-  <img src="docs/screenshots/01.png" alt="Board tab" width="80%" />
-</p>
-
-Press `?` for the bindings available in the focused tab, `q` (or `ctrl+c`) to exit. Open any card for the full description and comments, or jump to the Features, Docs, and History tabs:
+A full-screen kanban opens with four tabs — Board (shown at the top of this README), Features, Docs, and History — driven entirely by the keyboard. Press `?` for the bindings available in the focused tab, `q` (or `ctrl+c`) to exit. Open any card for the full description and comments, or jump to the other tabs:
 
 <p align="center">
   <img src="docs/screenshots/02.png" alt="Card overlay" width="49%" />
