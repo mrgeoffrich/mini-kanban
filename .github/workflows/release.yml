@@ -58,3 +58,48 @@ jobs:
             dist/mk-*.tar.gz \
             dist/mk-*.zip \
             dist/checksums.txt
+
+  update-homebrew-tap:
+    # Bumps Formula/mk.rb in mrgeoffrich/homebrew-mk to the freshly-released
+    # version. Requires a HOMEBREW_TAP_TOKEN repo secret holding a PAT with
+    # push access to the tap repo (the default GITHUB_TOKEN can't push
+    # across repos). Failures here do not roll back the release.
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout mini-kanban (for render script)
+        uses: actions/checkout@v4
+
+      - name: Download release checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern checksums.txt \
+            --dir .
+
+      - name: Checkout homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: mrgeoffrich/homebrew-mk
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Render formula
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          bash scripts/render-tap-formula.sh "$version" < checksums.txt > tap/Formula/mk.rb
+
+      - name: Commit and push
+        working-directory: tap
+        run: |
+          if git diff --quiet Formula/mk.rb; then
+            echo "Formula already up to date for ${GITHUB_REF_NAME}; nothing to push."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add Formula/mk.rb
+          git commit -m "mk ${GITHUB_REF_NAME}"
+          git push
