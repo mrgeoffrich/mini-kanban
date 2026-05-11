@@ -81,6 +81,10 @@ else
 fi
 
 "$tmp"/mk-v*-${host}/mk --help >/dev/null && echo "host binary OK"
+
+# Also confirm the ldflag-injected version matches the tag you built
+# (catches a broken -X path before tagging real assets).
+"$tmp"/mk-v*-${host}/mk --version
 ```
 
 ### 5. Tag and push — the irreversible step. Confirm first.

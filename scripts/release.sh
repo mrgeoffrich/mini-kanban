@@ -37,7 +37,9 @@ cd "$(git rev-parse --show-toplevel)"
 
 DIST="dist"
 PKG="./cmd/mk"
-LDFLAGS="-s -w"
+# `-X .../version.Version=$VERSION` makes `mk --version` print the tag
+# the binary was built from (e.g. v0.2.1) instead of the "dev" default.
+LDFLAGS="-s -w -X github.com/mrgeoffrich/mini-kanban/internal/version.Version=${VERSION}"
 
 # The standard release matrix. Edit deliberately — keeping the platform set
 # stable across versions makes life easier for downstream package managers

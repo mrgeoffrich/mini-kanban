@@ -8,17 +8,26 @@ It's a single binary on top of one SQLite file at `~/.mini-kanban/db.sqlite`. No
 
 ## Install
 
-Pure-Go SQLite (modernc), no CGO required:
+**Homebrew** (macOS and Linux, prebuilt binaries):
+
+```bash
+brew tap mrgeoffrich/mk
+brew install mk
+```
+
+**`go install`** (pure-Go SQLite via modernc, no CGO required):
 
 ```bash
 go install github.com/mrgeoffrich/mini-kanban/cmd/mk@latest
 ```
 
-Or build from a checkout:
+**From a checkout:**
 
 ```bash
 go build -o ~/.local/bin/mk ./cmd/mk
 ```
+
+Either way, `mk --version` prints the version (release tag for prebuilt or `go install`-ed binaries; commit hash for `go build`).
 
 ## Quick start
 

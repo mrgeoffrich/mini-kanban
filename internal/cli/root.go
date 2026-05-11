@@ -2,6 +2,8 @@ package cli
 
 import (
 	"github.com/spf13/cobra"
+
+	"github.com/mrgeoffrich/mini-kanban/internal/version"
 )
 
 type outputFormat string
@@ -26,6 +28,7 @@ func NewRoot() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "mk",
 		Short:         "mini-kanban: a local-first issue tracker, CLI-first",
+		Version:       version.String(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
