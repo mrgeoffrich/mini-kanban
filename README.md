@@ -80,7 +80,7 @@ A full-screen kanban with four tabs — Board (above), Features, Docs, History �
 2. **From inside your project, seed it:**
 
    ```bash
-   mk sync init ~/sync/your-project --remote git@github.com:you/your-project-mk-sync.git
+   mk sync init ~/sync/your-project --remote https://github.com/you/your-project-mk-sync.git
    ```
 
    This creates `~/sync/your-project` with one file per issue, feature, and document, commits, and pushes. It also writes `.mk/config.yaml` inside your project (check it in) so future `mk sync` calls — and other machines via `mk sync clone` — know which remote to use.
