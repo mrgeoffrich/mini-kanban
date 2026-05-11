@@ -2,7 +2,7 @@
 
 A local-first kanban board for anyone. **claude does the work, you orchestrate it.**
 
-You talk to Claude Code; claude does the typing — files issues, updates state, breaks features into tasks, answers questions about your board. You mostly *read* — in your editor of choice, on the CLI (`mk issue list`),in the TUI or in your favourite editor.
+You talk to Claude Code; claude does the typing — files issues, updates state, breaks features into tasks, answers questions about your board. You mostly *read* — in your editor of choice, on the CLI (`mk issue list`) , in the TUI (`mk tui`) or in your favourite editor.
 
 <p align="center">
   <img src="docs/screenshots/01.png" alt="The mk TUI board" width="80%" />
