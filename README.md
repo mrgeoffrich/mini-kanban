@@ -4,7 +4,7 @@ A local-first kanban for developers. **claude does the work, you orchestrate it.
 
 You talk to Claude Code; claude does the typing — files issues, updates state, breaks features into tasks, answers questions about your board. You mostly *read* — in your editor, on the CLI (`mk issue list`), or in `mk tui`.
 
-Your board is a SQLite file at `~/.mini-kanban/db.sqlite`. `mk init` and `mk install-skill` are the whole setup.
+Your board is a SQLite file at `~/.mini-kanban/db.sqlite`. Just run `mk init` and `mk install-skill` to get started.
 
 <p align="center">
   <img src="docs/screenshots/01.png" alt="The mk TUI board" width="80%" />
