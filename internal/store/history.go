@@ -103,6 +103,16 @@ func (s *Store) ListHistory(f HistoryFilter) ([]*model.HistoryEntry, error) {
 	return out, rows.Err()
 }
 
+// DeleteHistoryByRepo wipes every history row stamped with this
+// repo_id. Used by `mk repo rm` to keep the audit log free of
+// dead-prefix entries after a repo is dropped. The schema doesn't FK
+// history.repo_id → repos(id), so the rows would otherwise survive
+// the cascade.
+func (s *Store) DeleteHistoryByRepo(repoID int64) error {
+	_, err := s.DB.Exec(`DELETE FROM history WHERE repo_id = ?`, repoID)
+	return err
+}
+
 func scanHistory(row rowScanner) (*model.HistoryEntry, error) {
 	var (
 		e        model.HistoryEntry

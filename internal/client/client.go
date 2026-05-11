@@ -42,6 +42,24 @@ const (
 // Callers should wrap with a verb-specific message when surfacing.
 var ErrLocalOnly = errors.New("not supported in remote mode")
 
+// RepoConfirmError is returned by DeleteRepo when the supplied
+// `confirm` is missing or doesn't match the target prefix. The
+// embedded Preview gives the caller everything needed to render the
+// impact alert without a second round-trip; callers can errors.As
+// against this type to recognise the case and format their warning.
+type RepoConfirmError struct {
+	Prefix     string
+	GotConfirm string
+	Preview    *RepoDeletePreview
+}
+
+func (e *RepoConfirmError) Error() string {
+	if e.GotConfirm == "" {
+		return "destructive operation requires --confirm <prefix>; ask the user before proceeding"
+	}
+	return "confirm value " + e.GotConfirm + " does not match repo prefix " + e.Prefix
+}
+
 // Open constructs a Client based on opts. Remote backends do not open
 // the local DB; the DBPath is ignored when Remote is set.
 func Open(ctx context.Context, opts Options) (Client, error) {
@@ -74,6 +92,14 @@ type Client interface {
 	// the previous resolveRepo() helper. created reports whether a new
 	// row was inserted.
 	EnsureRepo(ctx context.Context, info *git.Info) (repo *model.Repo, created bool, err error)
+	// DeleteRepo removes the repo identified by prefix and every row
+	// that hangs off it (issues, comments, features, documents, links,
+	// relations, PRs, tags, TUI settings, history). Confirm MUST equal
+	// prefix (case-insensitive) — the backend errors with
+	// ErrRepoConfirmRequired and a populated preview otherwise, so
+	// callers / agents can show the impact and ask the user before
+	// retrying.
+	DeleteRepo(ctx context.Context, prefix, confirm string, dryRun bool) (deletedRepo *model.Repo, preview *RepoDeletePreview, err error)
 
 	// ----- Features -----
 	ListFeatures(ctx context.Context, repo *model.Repo, withDescription bool) ([]*model.Feature, error)

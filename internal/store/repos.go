@@ -204,6 +204,78 @@ func (s *Store) RecomputeNextIssueNumber(repoID int64) error {
 	return err
 }
 
+// RepoCascadeCounts is the impact preview for `mk repo rm` — every
+// row that would disappear if DeleteRepo(id) were called.
+type RepoCascadeCounts struct {
+	Issues        int `json:"issues"`
+	Comments      int `json:"comments"`
+	Relations     int `json:"relations"`
+	PullRequests  int `json:"pull_requests"`
+	Tags          int `json:"tags"`
+	Features      int `json:"features"`
+	Documents     int `json:"documents"`
+	DocumentLinks int `json:"document_links"`
+	TUISettings   int `json:"tui_settings"`
+	History       int `json:"history"`
+}
+
+// RepoCascadeCountsForID returns counts for everything that would be
+// deleted alongside the repo. The counts are read independently — no
+// transaction — so concurrent writers can drift them slightly, which
+// is fine for a preview.
+func (s *Store) RepoCascadeCountsForID(repoID int64) (RepoCascadeCounts, error) {
+	var c RepoCascadeCounts
+	queries := []struct {
+		dst *int
+		sql string
+	}{
+		{&c.Issues, `SELECT COUNT(*) FROM issues WHERE repo_id = ?`},
+		{&c.Features, `SELECT COUNT(*) FROM features WHERE repo_id = ?`},
+		{&c.Documents, `SELECT COUNT(*) FROM documents WHERE repo_id = ?`},
+		{&c.TUISettings, `SELECT COUNT(*) FROM tui_settings WHERE repo_id = ?`},
+		{&c.History, `SELECT COUNT(*) FROM history WHERE repo_id = ?`},
+		{&c.Comments, `SELECT COUNT(*) FROM comments WHERE issue_id IN (SELECT id FROM issues WHERE repo_id = ?)`},
+		{&c.Tags, `SELECT COUNT(*) FROM issue_tags WHERE issue_id IN (SELECT id FROM issues WHERE repo_id = ?)`},
+		{&c.PullRequests, `SELECT COUNT(*) FROM issue_pull_requests WHERE issue_id IN (SELECT id FROM issues WHERE repo_id = ?)`},
+		{&c.Relations, `SELECT COUNT(*) FROM issue_relations WHERE from_issue_id IN (SELECT id FROM issues WHERE repo_id = ?) OR to_issue_id IN (SELECT id FROM issues WHERE repo_id = ?)`},
+		{&c.DocumentLinks, `SELECT COUNT(*) FROM document_links WHERE document_id IN (SELECT id FROM documents WHERE repo_id = ?) OR issue_id IN (SELECT id FROM issues WHERE repo_id = ?) OR feature_id IN (SELECT id FROM features WHERE repo_id = ?)`},
+	}
+	for _, q := range queries {
+		// The relations query has two ? placeholders, the doc_links one
+		// has three; everything else has one. Bind the same repoID
+		// across however many ? marks the statement carries.
+		nargs := strings.Count(q.sql, "?")
+		args := make([]any, nargs)
+		for i := range args {
+			args[i] = repoID
+		}
+		if err := s.DB.QueryRow(q.sql, args...).Scan(q.dst); err != nil {
+			return RepoCascadeCounts{}, fmt.Errorf("count: %w", err)
+		}
+	}
+	return c, nil
+}
+
+// DeleteRepo drops a repo row, which cascades through every table
+// that references repos(id) (features, issues, documents,
+// tui_settings) and transitively through everything below those
+// (comments, issue_tags, issue_relations, issue_pull_requests,
+// document_links). History rows are NOT covered by the cascade —
+// they're deliberately FK-less so audit entries survive normal
+// deletes; the caller (mk repo rm) is expected to call
+// DeleteHistoryByRepo first when it wants the clean-slate behaviour.
+func (s *Store) DeleteRepo(id int64) error {
+	res, err := s.DB.Exec(`DELETE FROM repos WHERE id = ?`, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) ListRepos() ([]*model.Repo, error) {
 	rows, err := s.DB.Query(`SELECT ` + repoCols + ` FROM repos ORDER BY prefix`)
 	if err != nil {

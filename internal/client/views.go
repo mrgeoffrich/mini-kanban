@@ -108,6 +108,18 @@ type DocumentDeletePreview struct {
 	WouldDelete bool                 `json:"would_delete"`
 }
 
+// RepoDeletePreview is what `mk repo rm` returns:
+//   - on `--dry-run`, exit 0 with this payload (no changes made);
+//   - when `confirm` is missing or mismatched, the same payload is
+//     bundled inside an error so the LLM driving the CLI sees the
+//     full impact and the alert message before deciding whether to
+//     re-run with --confirm.
+type RepoDeletePreview struct {
+	Repo        *model.Repo             `json:"repo"`
+	Cascade     store.RepoCascadeCounts `json:"cascade"`
+	WouldDelete bool                    `json:"would_delete"`
+}
+
 type DocumentUnlinkPreview struct {
 	Filename    string `json:"filename"`
 	Target      string `json:"target"`

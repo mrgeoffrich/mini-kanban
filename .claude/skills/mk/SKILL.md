@@ -112,7 +112,8 @@ Every mutating command accepts a global `--dry-run` flag. When set, the command 
 Worth using when:
 
 - You want to rehearse an `--json` payload before committing it, especially after composing it from `mk schema show`.
-- You're about to delete something and want the cascade counts first. `mk issue rm --dry-run` returns the issue plus how many comments / relations / PR attachments / doc links would be removed alongside it; same shape on `mk feature rm --dry-run` (issues unlinked, doc links removed) and `mk doc rm --dry-run` (links removed).
+- You're about to delete something and want the cascade counts first. `mk issue rm --dry-run` returns the issue plus how many comments / relations / PR attachments / doc links would be removed alongside it; same shape on `mk feature rm --dry-run` (issues unlinked, doc links removed), `mk doc rm --dry-run` (links removed), and `mk repo rm --dry-run` (issues, comments, features, documents, history — the full blast radius).
+- `mk repo rm <PREFIX>` is the one destructive command that *also* needs an explicit `--confirm <PREFIX>` token. Without it the command exits non-zero with a "STOP — DESTRUCTIVE OPERATION REQUIRES HUMAN APPROVAL" alert and the impact preview. **An agent must show that preview to the user, get an unambiguous confirmation, then re-run with `--confirm <PREFIX>`.** This is intentional friction — `mk repo rm` cascades through every issue, comment, feature, doc, link, and history row attached to the repo.
 - You want to confirm a complicated `mk issue edit` patch would resolve to the right object (especially for `feature_slug: null` clears).
 
 Notes:
@@ -161,6 +162,18 @@ mk init [--prefix XXXX]              Bind cwd to a prefix (auto-runs on first
                                      derived prefix)
 mk repo list                         List every tracked repo
 mk repo show [PREFIX]                Show a repo (defaults to cwd's repo)
+mk repo rm <PREFIX> --confirm <PREFIX>
+                                     ⚠️ DESTRUCTIVE & IRREVERSIBLE. Wipes
+                                     the repo plus every issue, comment,
+                                     feature, document, link, relation,
+                                     PR attachment, TUI setting and
+                                     history row attached to it. Without
+                                     --confirm <PREFIX> the command
+                                     prints the impact preview and exits
+                                     non-zero — agents MUST stop and ask
+                                     the user before re-running. Run
+                                     with --dry-run first to inspect
+                                     the cascade.
 mk status                            Show the current repo, DB path, and
                                      quick stats (feature count + issues
                                      grouped by state); outside any tracked
