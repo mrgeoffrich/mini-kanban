@@ -65,13 +65,17 @@ func Open(path string) (*Repo, error) {
 	return &Repo{Root: abs}, nil
 }
 
-// Init runs `git init` at path and returns a *Repo bound to it. The
-// directory is created if it doesn't yet exist.
+// Init runs `git init -b main` at path and returns a *Repo bound to
+// it. The directory is created if it doesn't yet exist. We pin the
+// initial branch to `main` so sync repos look the same regardless of
+// the user's `init.defaultBranch` (Linux/older git defaults to
+// `master`, which mismatches the bare remote we push to and produces
+// an empty checkout for the next cloner).
 func Init(path string) (*Repo, error) {
 	if err := os.MkdirAll(path, 0o755); err != nil {
 		return nil, fmt.Errorf("mkdir %s: %w", path, err)
 	}
-	if _, err := runGit(path, "init"); err != nil {
+	if _, err := runGit(path, "init", "-b", "main"); err != nil {
 		return nil, err
 	}
 	return Open(path)
