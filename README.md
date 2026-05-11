@@ -2,9 +2,9 @@
 
 A local-first kanban for developers. **claude does the work, you orchestrate it.**
 
-You talk to Claude Code; claude files issues, updates state, breaks features into tasks, and answers questions about your board. As a human you mostly *read* — in your editor, on the CLI (`mk issue list`), or in the full-screen TUI (`mk tui`).
+You talk to Claude Code; claude does the typing — files issues, updates state, breaks features into tasks, answers questions about your board. You mostly *read* — in your editor, on the CLI (`mk issue list`), or in `mk tui`.
 
-One binary, one SQLite file at `~/.mini-kanban/db.sqlite`. No server, no account, no setup beyond `mk init` and `mk install-skill`.
+Your board is a SQLite file at `~/.mini-kanban/db.sqlite`. `mk init` and `mk install-skill` are the whole setup.
 
 <p align="center">
   <img src="docs/screenshots/01.png" alt="The mk TUI board" width="80%" />
@@ -45,7 +45,7 @@ Now open Claude Code and say:
 
 > File an issue: the login page 500s on Safari when the password contains a `&`.
 
-claude does the rest.
+claude does the rest — picks a title, picks tags, files the ticket, hands you back the key.
 
 For the full walk-through — first session, sample skills, multi-machine sync — see **[docs/getting-started.md](docs/getting-started.md)**.
 
@@ -56,7 +56,7 @@ cd ~/Repos/your-project
 mk tui
 ```
 
-A full-screen kanban opens with four tabs — Board (shown at the top of this README), Features, Docs, and History — driven entirely by the keyboard. Press `?` for the bindings available in the focused tab, `q` (or `ctrl+c`) to exit. Open any card for the full description and comments, or jump to the other tabs:
+A full-screen kanban with four tabs — Board (above), Features, Docs, History — all keyboard. `?` shows the bindings for the focused tab, `q` (or `ctrl+c`) exits. Open any card for the full description and comments, or jump to the other tabs:
 
 <p align="center">
   <img src="docs/screenshots/02.png" alt="Card overlay" width="49%" />
@@ -91,15 +91,15 @@ A full-screen kanban opens with four tabs — Board (shown at the top of this RE
    mk sync                # pull → import → export → commit → push
    ```
 
-   Run it whenever you want to flush local writes upstream and pick up anyone else's. Multi-machine setup, conflict semantics, and the inspect/verify tools live in [docs/getting-started.md](docs/getting-started.md#5-sync-across-machines-when-youre-ready).
+   Run it whenever — pushes your writes, pulls anyone else's. Multi-machine setup, conflict semantics, and the inspect/verify tools live in [docs/getting-started.md](docs/getting-started.md#5-sync-across-machines-when-youre-ready).
 
 ## Why mk
 
-- **Built for claude.** Every read returns JSON, every mutation accepts a JSON payload, every payload schema is published at runtime via `mk schema`. The bundled Claude Code skill (`mk install-skill`) is the single source of truth for agents.
-- **Local-first.** One SQLite file, one git working tree per project. No sync until you want it.
-- **Auditable.** Every mutation records who did it, when, and what changed. Pass `--user claude` so audits attribute correctly.
-- **Optional sync.** When you want the same board on a second machine or another teammate, `mk sync init` mirrors the DB to a checked-in YAML repo over plain git.
-- **Optional REST API.** `mk api` exposes the same operations over HTTP for non-shell callers (web UIs, IDE plugins, long-running agents). Same SQLite file, same JSON shapes, same audit log. See `docs/rest-api-design.md`.
+- **Built for claude.** Reads return JSON. Mutations take JSON. Every payload schema is reachable at runtime via `mk schema`. The bundled Claude Code skill (`mk install-skill`) is the single source of truth for agents.
+- **Local-first.** Your board is a SQLite file. Nothing leaves the laptop until you run `mk sync`.
+- **Auditable.** Every mutation records who, when, and what changed. (claude knows to pass `--user claude` so the log attributes correctly.)
+- **Optional sync.** Want the same board on a laptop and a desktop? `mk sync init`, plain git underneath.
+- **Optional REST API.** `mk api` puts the CLI behind HTTP — handy for web UIs, IDE plugins, long-running agents. See `docs/rest-api-design.md`.
 
 ## Project status
 
